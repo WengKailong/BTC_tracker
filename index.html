@@ -1,8 +1,8 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>BTC 地址余额追踪工具</title>
   <style>
     body {
@@ -56,6 +56,7 @@
       border-radius: 10px;
       background: white;
       box-shadow: 0 1px 4px rgba(0,0,0,0.05);
+      position: relative;
     }
     .address-card h4 {
       margin: 0;
@@ -63,9 +64,30 @@
       font-weight: 500;
     }
     .address-card p {
-      margin: 4px 0 0 0;
+      margin: 4px 0;
       font-size: 0.9rem;
       color: #555;
+    }
+    .delete-btn {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      background: #dc3545;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      padding: 4px 8px;
+      font-size: 0.8rem;
+      cursor: pointer;
+    }
+    .delete-btn:hover {
+      background-color: #b02a37;
+    }
+    .change-pos {
+      color: green;
+    }
+    .change-neg {
+      color: red;
     }
     #total-value {
       font-size: 1rem;
@@ -93,6 +115,10 @@
     let addresses = [];
     let btcPrice = 0;
 
+    function formatUSD(val) {
+      return val.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+    }
+
     async function fetchBTCPrice() {
       try {
         const res = await fetch('https://blockchain.info/ticker');
@@ -107,7 +133,10 @@
       try {
         const res = await fetch(`https://mempool.space/api/address/${address}`);
         const data = await res.json();
-        return data.chain_stats.funded_txo_sum - data.chain_stats.spent_txo_sum;
+        return {
+          current: data.chain_stats.funded_txo_sum - data.chain_stats.spent_txo_sum,
+          prev24: data.mempool_stats.funded_txo_sum - data.mempool_stats.spent_txo_sum
+        };
       } catch {
         return null;
       }
@@ -121,16 +150,18 @@
 
       if (!address || addresses.find(a => a.address === address)) return;
 
-      const satoshi = await fetchBalance(address);
-      if (satoshi === null) {
+      const result = await fetchBalance(address);
+      if (result === null) {
         alert("地址无效或查询失败");
         return;
       }
 
-      const btc = satoshi / 1e8;
+      const btc = result.current / 1e8;
       const usd = btc * btcPrice;
+      const changeBtc = (result.current - result.prev24) / 1e8;
+      const changePct = result.prev24 > 0 ? (changeBtc / (result.prev24 / 1e8)) * 100 : 0;
 
-      addresses.push({ address, label, btc, usd });
+      addresses.push({ address, label, btc, usd, changeBtc, changePct });
       saveToStorage();
       renderCards();
 
@@ -138,19 +169,33 @@
       inputLabel.value = '';
     }
 
+    function deleteAddress(index) {
+      addresses.splice(index, 1);
+      saveToStorage();
+      renderCards();
+    }
+
     function renderCards() {
       const container = document.getElementById('cards');
       container.innerHTML = '';
       let totalBTC = 0;
 
-      addresses.forEach(item => {
+      addresses.forEach((item, index) => {
+        const changeClass = item.changeBtc > 0 ? 'change-pos' :
+                            item.changeBtc < 0 ? 'change-neg' : '';
+        const changeText = item.changeBtc > 0 ? `+${item.changeBtc.toFixed(8)} BTC` :
+                           item.changeBtc < 0 ? `${item.changeBtc.toFixed(8)} BTC` : '0 BTC';
+        const changePct = item.changeBtc !== 0 ? ` (${item.changePct.toFixed(2)}%)` : '';
+
         const div = document.createElement('div');
         div.className = 'address-card';
         div.innerHTML = `
+          <button class="delete-btn" onclick="deleteAddress(${index})">删除</button>
           <h4>${item.label || '(无标签)'}</h4>
           <p><strong>地址：</strong>${item.address}</p>
           <p><strong>余额：</strong>${item.btc.toFixed(8)} BTC</p>
-          <p><strong>价值：</strong>$${item.usd.toFixed(2)} USD</p>
+          <p><strong>价值：</strong>${formatUSD(item.usd)}</p>
+          <p><strong>24小时变化：</strong><span class="${changeClass}">${changeText}${changePct}</span></p>
         `;
         container.appendChild(div);
         totalBTC += item.btc;
@@ -158,7 +203,7 @@
 
       const totalUSD = totalBTC * btcPrice;
       document.getElementById('total-value').textContent =
-        `总余额：${totalBTC.toFixed(8)} BTC ≈ $${totalUSD.toFixed(2)} USD`;
+        `总余额：${totalBTC.toFixed(8)} BTC ≈ ${formatUSD(totalUSD)}`;
     }
 
     function saveToStorage() {
@@ -170,11 +215,13 @@
       addresses = [];
 
       for (const item of saved) {
-        const satoshi = await fetchBalance(item.address);
-        if (satoshi === null) continue;
-        const btc = satoshi / 1e8;
+        const result = await fetchBalance(item.address);
+        if (result === null) continue;
+        const btc = result.current / 1e8;
         const usd = btc * btcPrice;
-        addresses.push({ ...item, btc, usd });
+        const changeBtc = (result.current - result.prev24) / 1e8;
+        const changePct = result.prev24 > 0 ? (changeBtc / (result.prev24 / 1e8)) * 100 : 0;
+        addresses.push({ ...item, btc, usd, changeBtc, changePct });
       }
 
       renderCards();
