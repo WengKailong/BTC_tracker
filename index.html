@@ -150,3 +150,45 @@
           <h4>${item.label || '(无标签)'}</h4>
           <p><strong>地址：</strong>${item.address}</p>
           <p><strong>余额：</strong>${item.btc.toFixed(8)} BTC</p>
+          <p><strong>价值：</strong>$${item.usd.toFixed(2)} USD</p>
+        `;
+        container.appendChild(div);
+        totalBTC += item.btc;
+      });
+
+      const totalUSD = totalBTC * btcPrice;
+      document.getElementById('total-value').textContent =
+        `总余额：${totalBTC.toFixed(8)} BTC ≈ $${totalUSD.toFixed(2)} USD`;
+    }
+
+    function saveToStorage() {
+      localStorage.setItem('btc_addresses', JSON.stringify(addresses));
+    }
+
+    async function loadFromStorage() {
+      const saved = JSON.parse(localStorage.getItem('btc_addresses') || '[]');
+      addresses = [];
+
+      for (const item of saved) {
+        const satoshi = await fetchBalance(item.address);
+        if (satoshi === null) continue;
+        const btc = satoshi / 1e8;
+        const usd = btc * btcPrice;
+        addresses.push({ ...item, btc, usd });
+      }
+
+      renderCards();
+    }
+
+    function clearAll() {
+      if (!confirm("确定要清除所有保存的地址？")) return;
+      localStorage.removeItem('btc_addresses');
+      addresses = [];
+      renderCards();
+      document.getElementById('total-value').textContent = '';
+    }
+
+    fetchBTCPrice().then(loadFromStorage);
+  </script>
+</body>
+</html>
