@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html>
 <head>
@@ -7,71 +6,87 @@
   <title>BTC 地址余额追踪工具</title>
   <style>
     body {
-      font-family: Arial, sans-serif;
-      margin: 20px;
-      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen,
+                   Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+      background-color: #f8f9fa;
+      color: #222;
+      margin: 0;
+      padding: 1rem;
     }
     h2 {
+      font-size: 1.4rem;
+      margin-bottom: 0.5rem;
       color: #333;
-      font-size: 1.4em;
-      margin-bottom: 10px;
+    }
+    .input-group {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+      margin-bottom: 1rem;
     }
     input[type="text"] {
+      padding: 12px;
+      font-size: 1rem;
+      border: 1px solid #ccc;
+      border-radius: 8px;
       width: 100%;
-      max-width: 400px;
-      padding: 10px;
-      margin-bottom: 10px;
       box-sizing: border-box;
     }
+    .button-row {
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+      margin-bottom: 1rem;
+    }
     button {
-      padding: 10px 16px;
-      margin: 5px 5px 10px 0;
-      font-size: 1em;
+      padding: 10px 18px;
+      font-size: 1rem;
+      border: none;
+      border-radius: 8px;
+      background-color: #007aff;
+      color: white;
+      cursor: pointer;
     }
-    table {
-      border-collapse: collapse;
-      width: 100%;
-      margin-top: 15px;
-      overflow-x: auto;
-      display: block;
+    button:hover {
+      background-color: #005fcc;
     }
-    th, td {
-      border: 1px solid #ccc;
-      padding: 8px 10px;
-      text-align: left;
-      font-size: 0.95em;
+    .address-card {
+      margin-bottom: 10px;
+      padding: 12px;
+      border-radius: 10px;
+      background: white;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.05);
     }
-    th {
-      background-color: #f2f2f2;
+    .address-card h4 {
+      margin: 0;
+      font-size: 1rem;
+      font-weight: 500;
+    }
+    .address-card p {
+      margin: 4px 0 0 0;
+      font-size: 0.9rem;
+      color: #555;
     }
     #total-value {
-      font-size: 1em;
-      margin-top: 20px;
+      font-size: 1rem;
       font-weight: bold;
+      margin-top: 1.5rem;
+      text-align: center;
     }
   </style>
 </head>
 <body>
   <h2>BTC 地址余额追踪工具</h2>
-  <p>输入任意 BTC 地址和可选标签，自动保存并显示余额和当前价值（美元）。</p>
-  <input type="text" id="btcAddress" placeholder="输入 BTC 地址">
-  <input type="text" id="btcLabel" placeholder="标签（可选）">
-  <br>
-  <button onclick="addAddress()">添加地址</button>
-  <button onclick="clearAll()">清空所有</button>
+  <div class="input-group">
+    <input type="text" id="btcAddress" placeholder="输入 BTC 地址">
+    <input type="text" id="btcLabel" placeholder="标签（可选）">
+  </div>
+  <div class="button-row">
+    <button onclick="addAddress()">添加地址</button>
+    <button onclick="clearAll()" style="background-color:#dc3545;">清空所有</button>
+  </div>
 
-  <table id="addressTable" style="display:none;">
-    <thead>
-      <tr>
-        <th>标签</th>
-        <th>地址</th>
-        <th>余额 (BTC)</th>
-        <th>当前价值 (USD)</th>
-      </tr>
-    </thead>
-    <tbody></tbody>
-  </table>
-
+  <div id="cards"></div>
   <div id="total-value"></div>
 
   <script>
@@ -117,62 +132,21 @@
 
       addresses.push({ address, label, btc, usd });
       saveToStorage();
-      renderTable();
+      renderCards();
 
       inputAddr.value = '';
       inputLabel.value = '';
     }
 
-    function renderTable() {
-      const tbody = document.querySelector('#addressTable tbody');
-      tbody.innerHTML = '';
+    function renderCards() {
+      const container = document.getElementById('cards');
+      container.innerHTML = '';
       let totalBTC = 0;
 
       addresses.forEach(item => {
-        const row = tbody.insertRow();
-        row.insertCell(0).textContent = item.label;
-        row.insertCell(1).textContent = item.address;
-        row.insertCell(2).textContent = item.btc.toFixed(8);
-        row.insertCell(3).textContent = "$" + item.usd.toFixed(2);
-        totalBTC += item.btc;
-      });
-
-      const table = document.getElementById('addressTable');
-      table.style.display = addresses.length ? '' : 'none';
-
-      const totalUSD = totalBTC * btcPrice;
-      document.getElementById('total-value').textContent =
-        `总余额: ${totalBTC.toFixed(8)} BTC ≈ $${totalUSD.toFixed(2)} USD`;
-    }
-
-    function saveToStorage() {
-      localStorage.setItem('btc_addresses', JSON.stringify(addresses));
-    }
-
-    async function loadFromStorage() {
-      const saved = JSON.parse(localStorage.getItem('btc_addresses') || '[]');
-      addresses = [];
-
-      for (const item of saved) {
-        const satoshi = await fetchBalance(item.address);
-        if (satoshi === null) continue;
-        const btc = satoshi / 1e8;
-        const usd = btc * btcPrice;
-        addresses.push({ ...item, btc, usd });
-      }
-
-      renderTable();
-    }
-
-    function clearAll() {
-      if (!confirm("确定要清除所有保存的地址？")) return;
-      localStorage.removeItem('btc_addresses');
-      addresses = [];
-      renderTable();
-      document.getElementById('total-value').textContent = '';
-    }
-
-    fetchBTCPrice().then(loadFromStorage);
-  </script>
-</body>
-</html>
+        const div = document.createElement('div');
+        div.className = 'address-card';
+        div.innerHTML = `
+          <h4>${item.label || '(无标签)'}</h4>
+          <p><strong>地址：</strong>${item.address}</p>
+          <p><strong>余额：</strong>${item.btc.toFixed(8)} BTC</p>
