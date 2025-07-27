@@ -1,0 +1,141 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>BTC 地址余额追踪工具</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 40px; }
+    h2 { color: #333; }
+    input[type="text"], input[type="text"]:focus { width: 300px; padding: 8px; margin-right: 10px; }
+    button { padding: 8px 12px; margin-right: 5px; }
+    table { border-collapse: collapse; margin-top: 20px; width: 100%; max-width: 800px; }
+    th, td { border: 1px solid #ccc; padding: 8px 12px; text-align: left; }
+    th { background-color: #f2f2f2; }
+    #total-value { font-size: 18px; margin-top: 20px; font-weight: bold; }
+  </style>
+</head>
+<body>
+  <h2>BTC 地址余额追踪工具</h2>
+  <p>输入任意 BTC 地址和可选标签，点击添加后将保存至浏览器并显示余额与当前价值（美元）。</p>
+  <input type="text" id="btcAddress" placeholder="输入 BTC 地址">
+  <input type="text" id="btcLabel" placeholder="标签（可选）">
+  <button onclick="addAddress()">添加地址</button>
+  <button onclick="clearAll()">清空所有</button>
+
+  <table id="addressTable" style="display:none;">
+    <thead>
+      <tr>
+        <th>标签</th>
+        <th>地址</th>
+        <th>余额 (BTC)</th>
+        <th>当前价值 (USD)</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+  <div id="total-value"></div>
+
+  <script>
+    let addresses = [];
+    let btcPrice = 0;
+
+    async function fetchBTCPrice() {
+      try {
+        const res = await fetch('https://blockchain.info/ticker');
+        const data = await res.json();
+        btcPrice = data.USD.last;
+      } catch {
+        alert("无法获取 BTC 当前价格");
+      }
+    }
+
+    async function fetchBalance(address) {
+      try {
+        const res = await fetch(`https://mempool.space/api/address/${address}`);
+        const data = await res.json();
+        return data.chain_stats.funded_txo_sum - data.chain_stats.spent_txo_sum;
+      } catch {
+        return null;
+      }
+    }
+
+    async function addAddress() {
+      const inputAddr = document.getElementById('btcAddress');
+      const inputLabel = document.getElementById('btcLabel');
+      const address = inputAddr.value.trim();
+      const label = inputLabel.value.trim() || "";
+
+      if (!address || addresses.find(a => a.address === address)) return;
+
+      const satoshi = await fetchBalance(address);
+      if (satoshi === null) {
+        alert("地址无效或查询失败");
+        return;
+      }
+
+      const btc = satoshi / 1e8;
+      const usd = btc * btcPrice;
+
+      addresses.push({ address, label, btc, usd });
+      saveToStorage();
+      renderTable();
+
+      inputAddr.value = '';
+      inputLabel.value = '';
+    }
+
+    function renderTable() {
+      const tbody = document.querySelector('#addressTable tbody');
+      tbody.innerHTML = '';
+      let totalBTC = 0;
+
+      addresses.forEach(item => {
+        const row = tbody.insertRow();
+        row.insertCell(0).textContent = item.label;
+        row.insertCell(1).textContent = item.address;
+        row.insertCell(2).textContent = item.btc.toFixed(8);
+        row.insertCell(3).textContent = "$" + item.usd.toFixed(2);
+        totalBTC += item.btc;
+      });
+
+      const table = document.getElementById('addressTable');
+      table.style.display = addresses.length ? '' : 'none';
+
+      const totalUSD = totalBTC * btcPrice;
+      document.getElementById('total-value').textContent =
+        `总余额: ${totalBTC.toFixed(8)} BTC ≈ $${totalUSD.toFixed(2)} USD`;
+    }
+
+    function saveToStorage() {
+      localStorage.setItem('btc_addresses', JSON.stringify(addresses));
+    }
+
+    async function loadFromStorage() {
+      const saved = JSON.parse(localStorage.getItem('btc_addresses') || '[]');
+      addresses = [];
+
+      for (const item of saved) {
+        const satoshi = await fetchBalance(item.address);
+        if (satoshi === null) continue;
+        const btc = satoshi / 1e8;
+        const usd = btc * btcPrice;
+        addresses.push({ ...item, btc, usd });
+      }
+
+      renderTable();
+    }
+
+    function clearAll() {
+      if (!confirm("确定要清除所有保存的地址？")) return;
+      localStorage.removeItem('btc_addresses');
+      addresses = [];
+      renderTable();
+      document.getElementById('total-value').textContent = '';
+    }
+
+    fetchBTCPrice().then(loadFromStorage);
+  </script>
+</body>
+</html>
