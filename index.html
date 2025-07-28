@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>BTC 地址余额追踪工具</title>
+  <title>BTC 地址余额追踪工具（自动刷新价格）</title>
   <style>
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen,
@@ -47,9 +47,6 @@
       color: white;
       cursor: pointer;
     }
-    button:hover {
-      background-color: #005fcc;
-    }
     .address-card {
       margin-bottom: 10px;
       padding: 12px;
@@ -80,25 +77,22 @@
       font-size: 0.8rem;
       cursor: pointer;
     }
-    .delete-btn:hover {
-      background-color: #b02a37;
-    }
     .change-pos {
       color: green;
     }
     .change-neg {
       color: red;
     }
-    #total-value {
+    #total-value, #btc-price-time {
       font-size: 1rem;
       font-weight: bold;
-      margin-top: 1.5rem;
+      margin-top: 1rem;
       text-align: center;
     }
   </style>
 </head>
 <body>
-  <h2>BTC 地址余额追踪工具</h2>
+  <h2>BTC 地址余额追踪工具（自动刷新价格）</h2>
   <div class="input-group">
     <input type="text" id="btcAddress" placeholder="输入 BTC 地址">
     <input type="text" id="btcLabel" placeholder="标签（可选）">
@@ -110,10 +104,12 @@
 
   <div id="cards"></div>
   <div id="total-value"></div>
+  <div id="btc-price-time"></div>
 
   <script>
     let addresses = [];
     let btcPrice = 0;
+    let priceFetchedAt = "";
 
     function formatUSD(val) {
       return val.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
@@ -124,8 +120,13 @@
         const res = await fetch('https://blockchain.info/ticker');
         const data = await res.json();
         btcPrice = data.USD.last;
+        const now = new Date();
+        priceFetchedAt = now.toLocaleString();
+        document.getElementById("btc-price-time").textContent =
+          `当前 BTC 价格：$${btcPrice}（获取时间：${priceFetchedAt}）`;
+        renderCards();
       } catch {
-        alert("无法获取 BTC 当前价格");
+        document.getElementById("btc-price-time").textContent = "无法获取 BTC 当前价格";
       }
     }
 
@@ -133,10 +134,7 @@
       try {
         const res = await fetch(`https://mempool.space/api/address/${address}`);
         const data = await res.json();
-        return {
-          current: data.chain_stats.funded_txo_sum - data.chain_stats.spent_txo_sum,
-          prev24: data.mempool_stats.funded_txo_sum - data.mempool_stats.spent_txo_sum
-        };
+        return data.chain_stats.funded_txo_sum - data.chain_stats.spent_txo_sum;
       } catch {
         return null;
       }
@@ -150,21 +148,23 @@
 
       if (!address || addresses.find(a => a.address === address)) return;
 
-      const result = await fetchBalance(address);
-      if (result === null) {
+      const satoshi = await fetchBalance(address);
+      if (satoshi === null) {
         alert("地址无效或查询失败");
         return;
       }
 
-      const btc = result.current / 1e8;
-      const usd = btc * btcPrice;
-      const changeBtc = (result.current - result.prev24) / 1e8;
-      const changePct = result.prev24 > 0 ? (changeBtc / (result.prev24 / 1e8)) * 100 : 0;
+      const btc = satoshi / 1e8;
+      const now = Date.now();
 
-      addresses.push({ address, label, btc, usd, changeBtc, changePct });
+      addresses.push({
+        address, label, btc,
+        snapshotBtc: btc,
+        snapshotTime: now
+      });
+
       saveToStorage();
       renderCards();
-
       inputAddr.value = '';
       inputLabel.value = '';
     }
@@ -181,11 +181,15 @@
       let totalBTC = 0;
 
       addresses.forEach((item, index) => {
-        const changeClass = item.changeBtc > 0 ? 'change-pos' :
-                            item.changeBtc < 0 ? 'change-neg' : '';
-        const changeText = item.changeBtc > 0 ? `+${item.changeBtc.toFixed(8)} BTC` :
-                           item.changeBtc < 0 ? `${item.changeBtc.toFixed(8)} BTC` : '0 BTC';
-        const changePct = item.changeBtc !== 0 ? ` (${item.changePct.toFixed(2)}%)` : '';
+        const change = item.btc - item.snapshotBtc;
+        const hoursSince = (Date.now() - item.snapshotTime) / (1000 * 60 * 60);
+        const showChange = hoursSince >= 24;
+
+        const changeClass = change > 0 ? 'change-pos' :
+                            change < 0 ? 'change-neg' : '';
+        const changeText = showChange
+          ? (change > 0 ? `+${change.toFixed(8)} BTC` : `${change.toFixed(8)} BTC`)
+          : `（尚未满24小时）`;
 
         const div = document.createElement('div');
         div.className = 'address-card';
@@ -193,9 +197,9 @@
           <button class="delete-btn" onclick="deleteAddress(${index})">删除</button>
           <h4>${item.label || '(无标签)'}</h4>
           <p><strong>地址：</strong>${item.address}</p>
-          <p><strong>余额：</strong>${item.btc.toFixed(8)} BTC</p>
-          <p><strong>价值：</strong>${formatUSD(item.usd)}</p>
-          <p><strong>24小时变化：</strong><span class="${changeClass}">${changeText}${changePct}</span></p>
+          <p><strong>当前余额：</strong>${item.btc.toFixed(8)} BTC</p>
+          <p><strong>当前价值：</strong>${formatUSD(item.btc * btcPrice)}</p>
+          <p><strong>24h 变化：</strong><span class="${changeClass}">${changeText}</span></p>
         `;
         container.appendChild(div);
         totalBTC += item.btc;
@@ -215,13 +219,10 @@
       addresses = [];
 
       for (const item of saved) {
-        const result = await fetchBalance(item.address);
-        if (result === null) continue;
-        const btc = result.current / 1e8;
-        const usd = btc * btcPrice;
-        const changeBtc = (result.current - result.prev24) / 1e8;
-        const changePct = result.prev24 > 0 ? (changeBtc / (result.prev24 / 1e8)) * 100 : 0;
-        addresses.push({ ...item, btc, usd, changeBtc, changePct });
+        const satoshi = await fetchBalance(item.address);
+        if (satoshi === null) continue;
+        const btc = satoshi / 1e8;
+        addresses.push({ ...item, btc });
       }
 
       renderCards();
@@ -236,6 +237,7 @@
     }
 
     fetchBTCPrice().then(loadFromStorage);
+    setInterval(fetchBTCPrice, 60000); // 每分钟自动刷新价格
   </script>
 </body>
 </html>
