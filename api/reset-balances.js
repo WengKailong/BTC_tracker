@@ -10,6 +10,8 @@ export default async function handler(req, res) {
 
   // 简单密码保护（在 Vercel 环境变量里设置 RESET_SECRET）
   const { secret } = req.query;
+  console.log("🔹 Received secret:", secret);
+  console.log("🔹 Env RESET_SECRET:", process.env.RESET_SECRET);
   if (!secret || secret !== process.env.RESET_SECRET) {
     return res.status(403).json({ message: "Forbidden: invalid secret" });
   }
