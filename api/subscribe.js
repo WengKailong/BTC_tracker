@@ -26,7 +26,7 @@ export default async function handler(req, res) {
   });
 
   const mailOptions = {
-    from: process.env.BREVO_USER,
+    from: `"BTC监控" <wengkailong@gmail.com>`,
     to: email,
     subject: "BTC 地址订阅确认",
     text: `您已成功订阅以下BTC地址余额提醒：\n\n${addresses.join("\n")}\n\n我们将在余额变化时发送提醒邮件。`,
