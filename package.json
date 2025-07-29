@@ -3,7 +3,8 @@
   "version": "1.0.0",
   "type": "module",
   "dependencies": {
-    "nodemailer": "^6.9.8",
-    "node-fetch": "^3.3.2"
+    "@vercel/kv": "^1.0.0",
+    "node-fetch": "^3.3.2",
+    "nodemailer": "^6.9.11"
   }
 }
