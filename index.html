@@ -3,179 +3,229 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>BTC 地址追踪工具</title>
+  <title>BTC 地址追踪器</title>
   <style>
-    body { font-family: Arial, sans-serif; margin: 20px; background: #f9f9f9; }
-    h1 { text-align: center; }
-    #price-info { text-align: center; margin-bottom: 20px; font-size: 18px; }
-    .input-container { text-align: center; margin-bottom: 20px; }
-    input { padding: 8px; margin: 5px; }
-    button { padding: 8px 12px; margin: 5px; cursor: pointer; }
-    table { width: 100%; border-collapse: collapse; margin-top: 20px; background: white; }
-    th, td { border: 1px solid #ddd; padding: 10px; text-align: center; }
-    th { background-color: #f0f0f0; }
-    .green { color: green; }
-    .red { color: red; }
-    .delete-btn { cursor: pointer; color: red; font-weight: bold; }
-    .summary { font-weight: bold; text-align: center; margin-top: 20px; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background-color: #f5f7fa;
+      margin: 0;
+      padding: 0;
+    }
+    header {
+      text-align: center;
+      padding: 20px;
+      background-color: #1a73e8;
+      color: white;
+    }
+    .container {
+      max-width: 600px;
+      margin: 20px auto;
+      padding: 10px;
+    }
+    .summary {
+      text-align: center;
+      background: white;
+      padding: 15px;
+      border-radius: 12px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.05);
+      margin-bottom: 20px;
+    }
+    .summary h2 { margin: 0; font-size: 18px; }
+    .summary p { margin: 5px 0; font-size: 14px; color: gray; }
+
+    .address-card {
+      background: white;
+      padding: 15px;
+      border-radius: 12px;
+      margin-bottom: 15px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.05);
+    }
+    .address-card h3 {
+      margin: 0;
+      font-size: 16px;
+      word-break: break-all;
+    }
+    .address-card .tag {
+      font-size: 13px;
+      color: gray;
+    }
+    .balance {
+      font-weight: bold;
+      font-size: 16px;
+      margin-top: 8px;
+    }
+    .fiat-value {
+      font-size: 14px;
+      color: #1a73e8;
+    }
+    .change {
+      font-size: 14px;
+      margin-top: 4px;
+    }
+    .change.positive { color: green; }
+    .change.negative { color: red; }
+
+    .input-group {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-bottom: 15px;
+    }
+    input[type="text"], input[type="email"] {
+      padding: 10px;
+      border-radius: 8px;
+      border: 1px solid #ccc;
+      font-size: 14px;
+    }
+    button {
+      padding: 10px;
+      border: none;
+      background-color: #1a73e8;
+      color: white;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    button:disabled { background-color: #ccc; }
+    .delete-btn {
+      background-color: #ff4d4f;
+      margin-top: 8px;
+    }
   </style>
 </head>
 <body>
+  <header>
+    <h1>BTC 地址追踪器</h1>
+  </header>
+  <div class="container">
+    <div class="summary">
+      <h2>总BTC: <span id="total-btc">0</span> | 总价值: $<span id="total-usd">0</span></h2>
+      <p>当前 BTC 价格: $<span id="btc-price">0</span> <br> 更新时间: <span id="last-updated">-</span></p>
+    </div>
 
-<h1>BTC 地址追踪工具</h1>
+    <div class="input-group">
+      <input type="text" id="address" placeholder="输入BTC地址">
+      <input type="text" id="label" placeholder="可选标签">
+      <button onclick="addAddress()">添加地址</button>
+    </div>
 
-<div id="price-info">
-  当前 BTC 价格: <span id="btc-price">--</span> USD  
-  <br>最后更新时间: <span id="last-updated">--</span>
-</div>
+    <div id="address-list"></div>
 
-<div class="input-container">
-  <input type="text" id="btcAddress" placeholder="输入BTC地址">
-  <input type="text" id="btcLabel" placeholder="标签（可选）">
-  <button onclick="addAddress()">添加地址</button>
-  <button onclick="refreshData()">刷新数据</button>
-</div>
+    <div class="input-group">
+      <input type="email" id="email" placeholder="输入订阅邮箱">
+      <button onclick="subscribe()">订阅余额变化邮件</button>
+    </div>
+  </div>
 
-<table>
-  <thead>
-    <tr>
-      <th>标签</th>
-      <th>BTC 地址</th>
-      <th>余额 (BTC)</th>
-      <th>价值 (USD)</th>
-      <th>24h 变化</th>
-      <th>操作</th>
-    </tr>
-  </thead>
-  <tbody id="address-table"></tbody>
-</table>
+  <script>
+    const apiBase = "https://api.blockcypher.com/v1/btc/main/addrs/";
+    let addresses = JSON.parse(localStorage.getItem("btc_addresses") || "[]");
+    let btcPrice = 0;
 
-<div class="summary">
-  总 BTC: <span id="total-btc">0</span> BTC  
-  &nbsp;|&nbsp; 总价值: <span id="total-usd">0</span> USD
-</div>
+    async function fetchBTCPrice() {
+      const res = await fetch("https://api.coindesk.com/v1/bpi/currentprice/USD.json");
+      const data = await res.json();
+      btcPrice = parseFloat(data.bpi.USD.rate.replace(/,/g, ""));
+      document.getElementById("btc-price").innerText = btcPrice.toLocaleString();
+      document.getElementById("last-updated").innerText = new Date().toLocaleTimeString();
+    }
 
-<hr>
+    async function fetchAddressInfo(addr) {
+      const res = await fetch(apiBase + addr);
+      return res.json();
+    }
 
-<div class="input-container">
-  <input type="email" id="email" placeholder="输入您的邮箱订阅提醒">
-  <button onclick="subscribe()">订阅余额变化邮件</button>
-</div>
+    async function refreshBalances() {
+      await fetchBTCPrice();
+      let totalBtc = 0;
+      let totalUsd = 0;
+      for (let addrObj of addresses) {
+        const data = await fetchAddressInfo(addrObj.address);
+        const balanceBtc = data.balance / 1e8;
+        const usdValue = balanceBtc * btcPrice;
 
-<script>
-let btcPrice = 0;
-let addresses = JSON.parse(localStorage.getItem("btcAddresses") || "[]");
-let history = JSON.parse(localStorage.getItem("btcHistory") || "{}");
+        // 计算 24 小时变化
+        const prevBalance = addrObj.lastBalance || balanceBtc;
+        const diff = balanceBtc - prevBalance;
+        addrObj.change = diff;
+        addrObj.lastBalance = balanceBtc;
+        addrObj.lastUpdate = Date.now();
 
-async function fetchBTCPrice() {
-  const res = await fetch("https://api.coindesk.com/v1/bpi/currentprice/BTC.json");
-  const data = await res.json();
-  btcPrice = data.bpi.USD.rate_float;
-  document.getElementById("btc-price").innerText = btcPrice.toLocaleString();
-  document.getElementById("last-updated").innerText = new Date().toLocaleString();
-}
+        totalBtc += balanceBtc;
+        totalUsd += usdValue;
 
-async function fetchBalance(address) {
-  const res = await fetch(`https://blockchain.info/q/addressbalance/${address}?confirmations=3`);
-  const satoshis = await res.text();
-  return parseInt(satoshis || "0") / 1e8;
-}
-
-async function refreshData() {
-  await fetchBTCPrice();
-
-  let totalBTC = 0;
-  let totalUSD = 0;
-  const tbody = document.getElementById("address-table");
-  tbody.innerHTML = "";
-
-  for (let addr of addresses) {
-    const balance = await fetchBalance(addr.address);
-    const usdValue = balance * btcPrice;
-    totalBTC += balance;
-    totalUSD += usdValue;
-
-    let changeText = "--";
-    if (!history[addr.address]) {
-      history[addr.address] = { balance, timestamp: Date.now() };
-    } else {
-      const oldBalance = history[addr.address].balance;
-      const diff = balance - oldBalance;
-      const percent = oldBalance === 0 ? 0 : (diff / oldBalance) * 100;
-      if (diff > 0) {
-        changeText = `<span class="green">+${diff.toFixed(8)} BTC (+${percent.toFixed(2)}%)</span>`;
-      } else if (diff < 0) {
-        changeText = `<span class="red">${diff.toFixed(8)} BTC (${percent.toFixed(2)}%)</span>`;
-      } else {
-        changeText = "0";
+        document.getElementById("address-" + addrObj.address).innerHTML = `
+          <h3>${addrObj.address}</h3>
+          <div class="tag">${addrObj.label || ""}</div>
+          <div class="balance">${balanceBtc.toFixed(8)} BTC</div>
+          <div class="fiat-value">$${usdValue.toLocaleString()}</div>
+          <div class="change ${diff > 0 ? 'positive' : (diff < 0 ? 'negative' : '')}">
+            ${diff > 0 ? '+' : (diff < 0 ? '-' : '')}${Math.abs(diff).toFixed(8)} BTC 
+            (${balanceBtc !== 0 ? ((diff / prevBalance) * 100).toFixed(2) : 0}%)
+          </div>
+          <button class="delete-btn" onclick="deleteAddress('${addrObj.address}')">删除此地址</button>
+        `;
       }
-      if (Date.now() - history[addr.address].timestamp >= 24*60*60*1000) {
-        history[addr.address] = { balance, timestamp: Date.now() };
+      localStorage.setItem("btc_addresses", JSON.stringify(addresses));
+      document.getElementById("total-btc").innerText = totalBtc.toFixed(8);
+      document.getElementById("total-usd").innerText = totalUsd.toLocaleString();
+    }
+
+    function renderAddresses() {
+      const container = document.getElementById("address-list");
+      container.innerHTML = "";
+      addresses.forEach(addrObj => {
+        const card = document.createElement("div");
+        card.className = "address-card";
+        card.id = "address-" + addrObj.address;
+        card.innerHTML = `<h3>${addrObj.address}</h3><div class="balance">加载中...</div>`;
+        container.appendChild(card);
+      });
+      refreshBalances();
+    }
+
+    function addAddress() {
+      const addr = document.getElementById("address").value.trim();
+      const label = document.getElementById("label").value.trim();
+      if (!addr) return alert("请输入BTC地址");
+      addresses.push({ address: addr, label: label, lastBalance: 0 });
+      localStorage.setItem("btc_addresses", JSON.stringify(addresses));
+      document.getElementById("address").value = "";
+      document.getElementById("label").value = "";
+      renderAddresses();
+    }
+
+    function deleteAddress(addr) {
+      addresses = addresses.filter(a => a.address !== addr);
+      localStorage.setItem("btc_addresses", JSON.stringify(addresses));
+      renderAddresses();
+    }
+
+    async function subscribe() {
+      const email = document.getElementById("email").value.trim();
+      if (!email || addresses.length === 0) {
+        alert("邮箱和至少一个BTC地址必填");
+        return;
+      }
+      try {
+        const res = await fetch("/api/subscribe", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            email,
+            addresses: addresses.map(a => a.address)
+          })
+        });
+        const result = await res.json();
+        alert(result.message || "订阅成功，确认邮件已发送至您的邮箱");
+      } catch (err) {
+        console.error(err);
+        alert("订阅失败，请稍后重试");
       }
     }
 
-    const row = document.createElement("tr");
-    row.innerHTML = `
-      <td>${addr.label || ""}</td>
-      <td>${addr.address}</td>
-      <td>${balance.toFixed(8)}</td>
-      <td>${usdValue.toLocaleString(undefined,{minimumFractionDigits:2, maximumFractionDigits:2})}</td>
-      <td>${changeText}</td>
-      <td class="delete-btn" onclick="deleteAddress('${addr.address}')">删除</td>
-    `;
-    tbody.appendChild(row);
-  }
-
-  document.getElementById("total-btc").innerText = totalBTC.toFixed(8);
-  document.getElementById("total-usd").innerText = totalUSD.toLocaleString(undefined,{minimumFractionDigits:2, maximumFractionDigits:2});
-
-  localStorage.setItem("btcAddresses", JSON.stringify(addresses));
-  localStorage.setItem("btcHistory", JSON.stringify(history));
-}
-
-function addAddress() {
-  const address = document.getElementById("btcAddress").value.trim();
-  const label = document.getElementById("btcLabel").value.trim();
-  if (!address) return alert("请输入BTC地址");
-
-  addresses.push({ address, label });
-  document.getElementById("btcAddress").value = "";
-  document.getElementById("btcLabel").value = "";
-  refreshData();
-}
-
-function deleteAddress(addr) {
-  addresses = addresses.filter(a => a.address !== addr);
-  localStorage.setItem("btcAddresses", JSON.stringify(addresses));
-  refreshData();
-}
-
-// 订阅功能
-async function subscribe() {
-  const email = document.getElementById("email").value.trim();
-  if (!email || addresses.length === 0) {
-    alert("邮箱和至少一个BTC地址必填");
-    return;
-  }
-  try {
-    const res = await fetch("/api/subscribe", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        email,
-        addresses: addresses.map(a => a.address)
-      })
-    });
-    const result = await res.json();
-    alert(result.message || "订阅成功，确认邮件已发送至您的邮箱");
-  } catch (err) {
-    console.error(err);
-    alert("订阅失败，请稍后重试");
-  }
-}
-
-refreshData();
-</script>
-
+    renderAddresses();
+    setInterval(refreshBalances, 60000);
+  </script>
 </body>
 </html>
