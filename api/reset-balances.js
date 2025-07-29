@@ -3,8 +3,15 @@ import { initializeApp, getApps } from "firebase/app";
 import { getDatabase, ref, get, update } from "firebase/database";
 
 export default async function handler(req, res) {
-  if (req.method !== "POST") {
-    return res.status(405).json({ message: "Method Not Allowed, use POST" });
+  // 只允许 GET
+  if (req.method !== "GET") {
+    return res.status(405).json({ message: "Method Not Allowed, use GET" });
+  }
+
+  // 简单密码保护（在 Vercel 环境变量里设置 RESET_SECRET）
+  const { secret } = req.query;
+  if (!secret || secret !== process.env.RESET_SECRET) {
+    return res.status(403).json({ message: "Forbidden: invalid secret" });
   }
 
   // 初始化 Firebase（避免重复初始化）
