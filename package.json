@@ -1,14 +1,9 @@
 {
-  "name": "btc-balance-monitor",
+  "name": "btc-tracker",
   "version": "1.0.0",
   "type": "module",
-  "main": "index.js",
-  "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start"
-  },
   "dependencies": {
-    "nodemailer": "^6.9.0"
+    "nodemailer": "^6.9.8",
+    "node-fetch": "^3.3.2"
   }
 }
