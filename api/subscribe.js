@@ -11,18 +11,20 @@ export default async function handler(req, res) {
     return res.status(400).json({ message: "邮箱和BTC地址必填" });
   }
 
-  // 配置 Brevo SMTP
+  // 打印环境变量（调试用）
+  console.log("DEBUG BREVO_USER:", process.env.BREVO_USER ? "存在" : "不存在");
+  console.log("DEBUG BREVO_KEY:", process.env.BREVO_KEY ? "存在" : "不存在");
+
   const transporter = nodemailer.createTransport({
     host: "smtp-relay.brevo.com",
     port: 587,
-    secure: false, // TLS 自动升级
+    secure: false,
     auth: {
-      user: process.env.BREVO_USER, // 例如你的 Brevo 登录邮箱
-      pass: process.env.BREVO_KEY   // Brevo 提供的 SMTP Key
+      user: process.env.BREVO_USER,
+      pass: process.env.BREVO_KEY
     }
   });
 
-  // 生成邮件内容
   const mailOptions = {
     from: process.env.BREVO_USER,
     to: email,
@@ -35,6 +37,6 @@ export default async function handler(req, res) {
     res.status(200).json({ message: "订阅成功，确认邮件已发送至您的邮箱。" });
   } catch (error) {
     console.error("发送邮件失败:", error);
-    res.status(500).json({ message: "邮件发送失败，请检查服务器配置。" });
+    res.status(500).json({ message: "邮件发送失败，请检查服务器配置。", error: error.message });
   }
 }
