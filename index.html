@@ -59,10 +59,11 @@
 
     async function fetchBalance(address) {
       try {
-        const res = await fetch(`https://blockchain.info/q/addressbalance/${address}?confirmations=1`);
+        const res = await fetch(`https://blockstream.info/api/address/${address}`);
         if (!res.ok) return 0;
-        const satoshi = await res.text();
-        return parseInt(satoshi, 10) / 1e8;
+        const data = await res.json();
+        const satoshi = data.chain_stats.funded_txo_sum - data.chain_stats.spent_txo_sum;
+        return satoshi / 1e8;
       } catch (err) {
         console.error("获取余额失败", err);
         return 0;
