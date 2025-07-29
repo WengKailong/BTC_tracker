@@ -1,21 +1,20 @@
-// api/check-balances.js
 import fetch from "node-fetch";
 import nodemailer from "nodemailer";
-import { initializeApp } from "firebase/app";
-import { getDatabase, ref, get, update } from "firebase/database";
+import admin from "firebase-admin";
 
-// Firebase 配置
-const firebaseConfig = {
-  apiKey: process.env.FIREBASE_API_KEY,
-  authDomain: process.env.FIREBASE_AUTH_DOMAIN,
-  databaseURL: process.env.FIREBASE_DATABASE_URL,
-  projectId: process.env.FIREBASE_PROJECT_ID,
-};
+// 初始化 Firebase
+import serviceAccount from "../firebase-key.json" assert { type: "json" };
 
-const app = initializeApp(firebaseConfig);
-const db = getDatabase(app);
+if (!admin.apps.length) {
+  admin.initializeApp({
+    credential: admin.credential.cert(serviceAccount),
+    databaseURL: process.env.FIREBASE_DB_URL,
+  });
+}
 
-// Brevo SMTP 配置
+const db = admin.database();
+
+// 配置 Brevo 邮件
 const transporter = nodemailer.createTransport({
   host: "smtp-relay.brevo.com",
   port: 587,
@@ -25,58 +24,61 @@ const transporter = nodemailer.createTransport({
   },
 });
 
+// 获取 BTC 地址余额
+async function getBalance(addr) {
+  const res = await fetch(`https://blockstream.info/api/address/${addr}`);
+  if (!res.ok) return 0;
+  const data = await res.json();
+  const satoshi = data.chain_stats.funded_txo_sum - data.chain_stats.spent_txo_sum;
+  return satoshi / 1e8;
+}
+
+// 发送邮件
+async function sendEmail(email, addr, oldBal, newBal) {
+  const mailOptions = {
+    from: `"BTC监控" <wengkailong@gmail.com>`,
+    to: email,
+    subject: "BTC地址余额变化提醒",
+    html: `
+      <h3>您的BTC地址余额发生变化</h3>
+      <p>地址: ${addr}</p>
+      <p>原余额: ${oldBal} BTC</p>
+      <p>新余额: ${newBal} BTC</p>
+    `,
+  };
+
+  await transporter.sendMail(mailOptions);
+}
+
 export default async function handler(req, res) {
-  try {
-    const snapshot = await get(ref(db, "subscribers"));
-    const subscribers = snapshot.val() || {};
+  const snapshot = await db.ref("subscribers").once("value");
+  const subscribers = snapshot.val() || {};
 
-    const updates = [];
+  const updates = [];
 
-    for (let key in subscribers) {
-      const sub = subscribers[key];
-      const lastBalances = sub.lastBalances || {};
+  for (const [key, sub] of Object.entries(subscribers)) {
+    const addresses = sub.addresses || [];
+    const lastBalances = sub.lastBalances || {};
 
-      for (let addr of sub.addresses) {
-        // 查询BTC余额
-        const resp = await fetch(`https://blockstream.info/api/address/${addr}`);
-        if (!resp.ok) continue;
+    for (const addr of addresses) {
+      const oldBal = lastBalances[addr] ?? null;
+      const newBal = await getBalance(addr);
 
-        const data = await resp.json();
-        const satoshi =
-          data.chain_stats.funded_txo_sum - data.chain_stats.spent_txo_sum;
-        const balance = satoshi / 1e8;
+      if (oldBal === null) {
+        // 初始化，不发邮件
+        await db.ref(`subscribers/${key}/lastBalances/${addr}`).set(newBal);
+        continue;
+      }
 
-        const prevBalance = lastBalances[addr] ?? null;
+      if (oldBal !== newBal) {
+        // 余额变化 -> 更新数据库 & 发邮件
+        await db.ref(`subscribers/${key}/lastBalances/${addr}`).set(newBal);
+        await sendEmail(sub.email, addr, oldBal, newBal);
 
-        // 如果首次记录或余额变化
-        if (prevBalance === null || prevBalance !== balance) {
-          // 发送邮件通知
-          if (prevBalance !== null) {
-            await transporter.sendMail({
-              from: `"BTC监控" <${process.env.BREVO_USER}>`,
-              to: sub.email,
-              subject: "BTC 地址余额变化提醒",
-              html: `
-                <h3>您的BTC地址余额发生变化</h3>
-                <p>地址：${addr}</p>
-                <p>上次余额：${prevBalance ?? 0} BTC</p>
-                <p>当前余额：${balance} BTC</p>
-              `,
-            });
-          }
-
-          // 更新Firebase中的lastBalances
-          updates.push({ key, addr, old: prevBalance, new: balance });
-          await update(ref(db, `subscribers/${key}/lastBalances`), {
-            [addr]: balance,
-          });
-        }
+        updates.push({ key, addr, old: oldBal, new: newBal });
       }
     }
-
-    res.status(200).json({ message: "Balance check complete", updates });
-  } catch (error) {
-    console.error("Error checking balances:", error);
-    res.status(500).json({ error: error.message });
   }
+
+  res.json({ message: "Balance check complete", updates });
 }
