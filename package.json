@@ -5,6 +5,7 @@
   "dependencies": {
     "@vercel/kv": "^1.0.0",
     "node-fetch": "^3.3.2",
-    "nodemailer": "^6.9.11"
+    "nodemailer": "^6.9.11",
+    "firebase": "^11.0.0"
   }
 }
