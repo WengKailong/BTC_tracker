@@ -1,9 +1,8 @@
 {
-  "version": 2,
   "crons": [
     {
       "path": "/api/check-balances",
-      "schedule": "*/10 * * * *"
+      "schedule": "0 10 * * *"
     }
   ]
 }
