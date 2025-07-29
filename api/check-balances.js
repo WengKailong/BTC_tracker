@@ -2,10 +2,14 @@ import fetch from "node-fetch";
 import nodemailer from "nodemailer";
 import admin from "firebase-admin";
 
-// 使用环境变量初始化 Firebase Admin，不依赖 firebase-key.json
-if (!admin.apps.length) {
-  const serviceAccount = JSON.parse(process.env.FIREBASE_KEY);
+// 1️⃣ 初始化 Firebase
+if (!process.env.FIREBASE_SERVICE_ACCOUNT) {
+  throw new Error("Missing FIREBASE_SERVICE_ACCOUNT environment variable");
+}
 
+const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+
+if (!admin.apps.length) {
   admin.initializeApp({
     credential: admin.credential.cert(serviceAccount),
     databaseURL: process.env.FIREBASE_DB_URL,
@@ -14,7 +18,7 @@ if (!admin.apps.length) {
 
 const db = admin.database();
 
-// 配置 Brevo 邮件
+// 2️⃣ 配置 Brevo 邮件
 const transporter = nodemailer.createTransport({
   host: "smtp-relay.brevo.com",
   port: 587,
@@ -24,7 +28,7 @@ const transporter = nodemailer.createTransport({
   },
 });
 
-// 获取 BTC 地址余额
+// 3️⃣ 获取 BTC 地址余额
 async function getBalance(addr) {
   const res = await fetch(`https://blockstream.info/api/address/${addr}`);
   if (!res.ok) return 0;
@@ -33,7 +37,7 @@ async function getBalance(addr) {
   return satoshi / 1e8;
 }
 
-// 发送邮件
+// 4️⃣ 发送邮件
 async function sendEmail(email, addr, oldBal, newBal) {
   const mailOptions = {
     from: `"BTC监控" <wengkailong@gmail.com>`,
@@ -50,6 +54,7 @@ async function sendEmail(email, addr, oldBal, newBal) {
   await transporter.sendMail(mailOptions);
 }
 
+// 5️⃣ 主处理逻辑
 export default async function handler(req, res) {
   const snapshot = await db.ref("subscribers").once("value");
   const subscribers = snapshot.val() || {};
