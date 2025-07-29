@@ -2,10 +2,10 @@ import fetch from "node-fetch";
 import nodemailer from "nodemailer";
 import admin from "firebase-admin";
 
-// 初始化 Firebase
-import serviceAccount from "../firebase-key.json" assert { type: "json" };
-
+// 使用环境变量初始化 Firebase Admin，不依赖 firebase-key.json
 if (!admin.apps.length) {
+  const serviceAccount = JSON.parse(process.env.FIREBASE_KEY);
+
   admin.initializeApp({
     credential: admin.credential.cert(serviceAccount),
     databaseURL: process.env.FIREBASE_DB_URL,
