@@ -14,8 +14,9 @@
     #totals { text-align: center; margin: 20px 0; font-size: 18px; }
     #wallets { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin: 10px; }
     .card { background: white; padding: 15px; border-radius: 12px; box-shadow: 0 2px 6px rgba(0,0,0,0.15); width: 90%; max-width: 400px; }
-    .address { font-size: 14px; word-break: break-word; margin-bottom: 5px; }
+    .address { font-size: 14px; word-break: break-word; margin-bottom: 5px; font-weight: bold; }
     .balance, .usdValue { font-size: 16px; margin-bottom: 5px; }
+    .emails { font-size: 12px; color: #555; margin-top: 5px; }
   </style>
 </head>
 <body>
@@ -50,28 +51,13 @@
       }
     }
 
-    async function fetchAllAddresses() {
+    async function fetchSubscribers() {
       try {
         const res = await fetch("/api/get-subscribers");
-        const data = await res.json();
-
-        const seen = new Set();
-        const addresses = [];
-
-        for (const key in data) {
-          const entry = data[key];
-          (entry.addresses || []).forEach(addr => {
-            if (!seen.has(addr)) {
-              seen.add(addr);
-              addresses.push(addr);
-            }
-          });
-        }
-
-        return addresses;
+        return await res.json();
       } catch (err) {
-        console.error("获取地址失败", err);
-        return [];
+        console.error("获取订阅数据失败", err);
+        return {};
       }
     }
 
@@ -91,13 +77,28 @@
     async function renderWallets() {
       const container = document.getElementById("wallets");
       container.innerHTML = "";
-      const addresses = await fetchAllAddresses();
+      const subscribers = await fetchSubscribers();
+
+      // address -> { emails: [], balance: 0 }
+      const addressMap = {};
+
+      for (const key in subscribers) {
+        const entry = subscribers[key];
+        const email = entry.email;
+        (entry.addresses || []).forEach(addr => {
+          if (!addressMap[addr]) addressMap[addr] = { emails: [], balance: 0 };
+          addressMap[addr].emails.push(email);
+        });
+      }
+
+      const addresses = Object.keys(addressMap);
       let totalBTC = 0;
 
       for (const addr of addresses) {
         const balance = await fetchBalance(addr);
         const usdValue = balance * btcPrice;
         totalBTC += balance;
+        addressMap[addr].balance = balance;
 
         const card = document.createElement("div");
         card.className = "card";
@@ -105,6 +106,7 @@
           <div class="address">${addr}</div>
           <div class="balance">余额: ${balance} BTC</div>
           <div class="usdValue">价值: $${usdValue.toLocaleString()}</div>
+          <div class="emails">订阅邮箱: ${addressMap[addr].emails.join(", ")}</div>
         `;
         container.appendChild(card);
       }
