@@ -2,35 +2,39 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>BTC 地址追踪器</title>
   <style>
     body { font-family: Arial, sans-serif; margin: 0; background: #f4f4f4; }
     h1 { text-align: center; padding: 15px; }
     #priceTimestamp { text-align: center; font-size: 14px; color: #555; margin-bottom: 10px; }
-    #subscribeForm { display: flex; flex-direction: column; align-items: center; gap: 8px; margin: 10px; }
-    #subscribeForm input { width: 90%; max-width: 400px; padding: 8px; }
-    #subscribeForm button { padding: 8px 16px; }
-    #totals { text-align: center; margin: 20px 0; font-size: 18px; }
+    #addForm { display: flex; flex-direction: column; align-items: center; margin: 10px; gap: 5px; }
+    #addForm input { width: 90%; max-width: 400px; padding: 8px; }
+    #addForm button { padding: 8px 16px; margin-top: 5px; }
     #wallets { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin: 10px; }
-    .card { background: white; padding: 15px; border-radius: 12px; box-shadow: 0 2px 6px rgba(0,0,0,0.15); width: 90%; max-width: 400px; }
-    .address { font-size: 14px; word-break: break-word; margin-bottom: 5px; font-weight: bold; }
-    .balance, .usdValue { font-size: 16px; margin-bottom: 5px; }
-    .emails { font-size: 12px; color: #555; margin-top: 5px; }
+    .card { background: white; padding: 15px; border-radius: 12px; box-shadow: 0 2px 6px rgba(0,0,0,0.15); width: 90%; max-width: 400px; position: relative; }
+    .address { font-size: 14px; word-break: break-all; margin-bottom: 5px; }
+    .balance { font-size: 18px; font-weight: bold; margin-bottom: 5px; }
+    .usdValue { font-size: 16px; color: #333; margin-bottom: 5px; }
+    .emails { font-size: 12px; color: #666; word-break: break-all; }
+    #totals { text-align: center; margin: 20px 0; font-size: 18px; }
+    @media (max-width: 600px) {
+      .card { width: 95%; }
+    }
   </style>
 </head>
 <body>
   <h1>BTC 地址追踪器</h1>
   <div id="priceTimestamp">加载BTC价格中...</div>
 
-  <form id="subscribeForm">
-    <input type="text" id="btcAddress" placeholder="输入一个BTC地址" required />
-    <input type="email" id="email" placeholder="订阅邮箱" required />
-    <button type="submit">提交订阅</button>
+  <form id="addForm">
+    <input type="text" id="btcAddress" placeholder="输入BTC地址" required />
+    <input type="email" id="email" placeholder="订阅邮箱（可选）" />
+    <button type="submit">添加地址并订阅提醒</button>
   </form>
 
   <div id="totals">
-    总BTC数量: <span id="totalBTC">0</span> BTC<br />
+    总BTC数量: <span id="totalBTC">0</span> BTC<br>
     总价值: $<span id="totalUSD">0</span>
   </div>
 
@@ -38,6 +42,35 @@
 
   <script>
     let btcPrice = 0;
+    let addressMap = {}; // { address: { balance, emails: Set([...]) } }
+
+    function maskEmail(email) {
+      const [name, domain] = email.split("@");
+      if (name.length <= 3) return name[0] + "*".repeat(name.length - 1) + "@" + domain;
+      return name.slice(0, 3) + "*".repeat(name.length - 3) + "@" + domain;
+    }
+
+    async function fetchSubscribers() {
+      const res = await fetch("/api/get-subscribers");
+      const data = await res.json();
+
+      addressMap = {};
+      for (const sub of Object.values(data)) {
+        const email = sub.email || "未填写邮箱";
+        const addresses = sub.addresses || [];
+
+        addresses.forEach(addr => {
+          if (!addressMap[addr]) {
+            addressMap[addr] = { balance: 0, emails: new Set() };
+          }
+          if (email !== "未填写邮箱") {
+            addressMap[addr].emails.add(email);
+          }
+        });
+      }
+      renderWallets();
+      updateBalances();
+    }
 
     async function fetchBTCPrice() {
       try {
@@ -46,18 +79,9 @@
         btcPrice = data.bitcoin.usd;
         document.getElementById("priceTimestamp").innerText =
           `BTC价格: $${btcPrice.toLocaleString()} (更新: ${new Date().toLocaleTimeString()})`;
+        updateTotals();
       } catch (err) {
         console.error("获取BTC价格失败", err);
-      }
-    }
-
-    async function fetchSubscribers() {
-      try {
-        const res = await fetch("/api/get-subscribers");
-        return await res.json();
-      } catch (err) {
-        console.error("获取订阅数据失败", err);
-        return {};
       }
     }
 
@@ -68,60 +92,57 @@
         const data = await res.json();
         const satoshi = data.chain_stats.funded_txo_sum - data.chain_stats.spent_txo_sum;
         return satoshi / 1e8;
-      } catch (err) {
-        console.error("获取余额失败", err);
+      } catch {
         return 0;
       }
     }
 
-    async function renderWallets() {
+    function renderWallets() {
       const container = document.getElementById("wallets");
       container.innerHTML = "";
-      const subscribers = await fetchSubscribers();
-
-      // address -> { emails: [], balance: 0 }
-      const addressMap = {};
-
-      for (const key in subscribers) {
-        const entry = subscribers[key];
-        const email = entry.email;
-        (entry.addresses || []).forEach(addr => {
-          if (!addressMap[addr]) addressMap[addr] = { emails: [], balance: 0 };
-          addressMap[addr].emails.push(email);
-        });
-      }
-
-      const addresses = Object.keys(addressMap);
-      let totalBTC = 0;
-
-      for (const addr of addresses) {
-        const balance = await fetchBalance(addr);
-        const usdValue = balance * btcPrice;
-        totalBTC += balance;
-        addressMap[addr].balance = balance;
-
+      Object.entries(addressMap).forEach(([addr, info], idx) => {
         const card = document.createElement("div");
         card.className = "card";
         card.innerHTML = `
           <div class="address">${addr}</div>
-          <div class="balance">余额: ${balance} BTC</div>
-          <div class="usdValue">价值: $${usdValue.toLocaleString()}</div>
-          <div class="emails">订阅邮箱: ${addressMap[addr].emails.join(", ")}</div>
+          <div class="balance" id="balance-${idx}">余额: 加载中...</div>
+          <div class="usdValue" id="usd-${idx}">价值: 加载中...</div>
+          <div class="emails">订阅邮箱: ${[...info.emails].map(maskEmail).join(", ") || "无"}</div>
         `;
         container.appendChild(card);
-      }
+      });
+    }
 
-      document.getElementById("totalBTC").innerText = totalBTC.toFixed(8);
+    async function updateBalances() {
+      let totalBTC = 0;
+      const addrs = Object.keys(addressMap);
+
+      for (let i = 0; i < addrs.length; i++) {
+        const addr = addrs[i];
+        const balance = await fetchBalance(addr);
+        addressMap[addr].balance = balance;
+        document.getElementById(`balance-${i}`).innerText = `余额: ${balance} BTC`;
+        const usdVal = btcPrice * balance;
+        document.getElementById(`usd-${i}`).innerText = `价值: $${usdVal.toLocaleString()}`;
+        totalBTC += balance;
+      }
+      document.getElementById("totalBTC").innerText = totalBTC;
       document.getElementById("totalUSD").innerText = (totalBTC * btcPrice).toLocaleString();
     }
 
-    document.getElementById("subscribeForm").addEventListener("submit", async (e) => {
+    function updateTotals() {
+      const totalBTC = Object.values(addressMap).reduce((sum, info) => sum + (info.balance || 0), 0);
+      document.getElementById("totalBTC").innerText = totalBTC;
+      document.getElementById("totalUSD").innerText = (totalBTC * btcPrice).toLocaleString();
+    }
+
+    document.getElementById("addForm").addEventListener("submit", async (e) => {
       e.preventDefault();
-      const btcAddress = document.getElementById("btcAddress").value.trim();
+      const addr = document.getElementById("btcAddress").value.trim();
       const email = document.getElementById("email").value.trim();
 
-      if (!btcAddress || !email) {
-        alert("请输入BTC地址和邮箱");
+      if (!addr) {
+        alert("BTC地址必填");
         return;
       }
 
@@ -129,25 +150,26 @@
         const res = await fetch("/api/subscribe", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email, addresses: [btcAddress] }),
+          body: JSON.stringify({ email, addresses: [addr] })
         });
-
         const result = await res.json();
-        alert(result.message || "订阅成功");
-        document.getElementById("btcAddress").value = "";
-        document.getElementById("email").value = "";
-        await renderWallets();
-      } catch (err) {
-        alert("订阅失败");
+        alert(result.message || "订阅请求已发送");
+        await fetchSubscribers();
+      } catch {
+        alert("订阅请求发送失败");
       }
+
+      document.getElementById("btcAddress").value = "";
+      document.getElementById("email").value = "";
     });
 
-    // 初始化
-    (async () => {
-      await fetchBTCPrice();
-      await renderWallets();
-      setInterval(fetchBTCPrice, 60000);
-    })();
+    // 初次加载
+    fetchBTCPrice();
+    fetchSubscribers();
+
+    // 定时刷新
+    setInterval(fetchBTCPrice, 60000);
+    setInterval(updateBalances, 60000);
   </script>
 </body>
 </html>
