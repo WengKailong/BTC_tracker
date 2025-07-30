@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>BTC 地址追踪器（Firebase版）</title>
+  <title>BTC 地址追踪器</title>
   <style>
     body { font-family: Arial, sans-serif; margin: 0; background: #f4f4f4; }
     h1 { text-align: center; padding: 15px; }
@@ -14,17 +14,10 @@
     .balance { font-size: 18px; font-weight: bold; margin-bottom: 5px; }
     .usdValue { font-size: 16px; color: #333; margin-bottom: 5px; }
     #totals { text-align: center; margin: 20px 0; font-size: 18px; }
-    @media (max-width: 600px) {
-      .card { width: 95%; }
-    }
   </style>
-
-  <!-- Firebase SDK -->
-  <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-database.js"></script>
 </head>
 <body>
-  <h1>BTC 地址追踪器（Firebase版）</h1>
+  <h1>BTC 地址追踪器</h1>
   <div id="priceTimestamp">加载BTC价格中...</div>
 
   <div id="totals">
@@ -35,25 +28,9 @@
   <div id="wallets"></div>
 
   <script>
-    // 1️⃣ 初始化 Firebase
-    const firebaseConfig = {
-            apiKey: "AIzaSyAFPHvDz67gLXFRkG8WZCdn8hZhPR49z6w",
-            authDomain: "btc-tracker-85578.firebaseapp.com",
-            databaseURL: "https://btc-tracker-85578-default-rtdb.firebaseio.com",
-            projectId: "btc-tracker-85578",
-            storageBucket: "btc-tracker-85578.firebasestorage.app",
-            messagingSenderId: "222986415665",
-            appId: "1:222986415665:web:468b4542f808dc7395af10",
-            measurementId: "G-10QM1M65QE"
-            };
-    firebase.initializeApp(firebaseConfig);
-    const db = firebase.database();
-
-    // 2️⃣ 全局变量
-    let wallets = [];
     let btcPrice = 0;
+    let wallets = []; // {address, balance}
 
-    // 3️⃣ 获取 BTC 价格
     async function fetchBTCPrice() {
       try {
         const res = await fetch("https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd");
@@ -67,21 +44,26 @@
       }
     }
 
-    // 4️⃣ 获取地址余额
-    async function fetchBalance(address) {
-      try {
-        const res = await fetch(`https://blockstream.info/api/address/${address}`);
-        if (!res.ok) return 0;
-        const data = await res.json();
-        const satoshi = data.chain_stats.funded_txo_sum - data.chain_stats.spent_txo_sum;
-        return satoshi / 1e8;
-      } catch (err) {
-        console.error("获取余额失败", err);
-        return 0;
+    async function fetchSubscribers() {
+      const res = await fetch("/api/get-subscribers");
+      const data = await res.json();
+      // data: { key1: {addresses:[], email:..}, ... }
+      wallets = [];
+      for (const [key, sub] of Object.entries(data)) {
+        (sub.addresses || []).forEach(addr => {
+          wallets.push({ address: addr, balance: 0 });
+        });
       }
+      renderWallets();
     }
 
-    // 5️⃣ 渲染卡片
+    async function fetchBalance(address) {
+      const res = await fetch(`https://blockstream.info/api/address/${address}`);
+      if (!res.ok) return 0;
+      const data = await res.json();
+      return (data.chain_stats.funded_txo_sum - data.chain_stats.spent_txo_sum) / 1e8;
+    }
+
     function renderWallets() {
       const container = document.getElementById("wallets");
       container.innerHTML = "";
@@ -98,7 +80,6 @@
       updateBalances();
     }
 
-    // 6️⃣ 更新余额显示
     async function updateBalances() {
       let totalBTC = 0;
       for (let i = 0; i < wallets.length; i++) {
@@ -113,27 +94,17 @@
       document.getElementById("totalUSD").innerText = (totalBTC * btcPrice).toLocaleString();
     }
 
-    // 7️⃣ 更新汇总
     function updateTotals() {
-      let totalBTC = wallets.reduce((sum, w) => sum + (w.balance || 0), 0);
+      const totalBTC = wallets.reduce((sum, w) => sum + (w.balance || 0), 0);
       document.getElementById("totalBTC").innerText = totalBTC;
       document.getElementById("totalUSD").innerText = (totalBTC * btcPrice).toLocaleString();
     }
 
-    // 8️⃣ 监听 Firebase 数据变化
-    db.ref("subscribers").on("value", snapshot => {
-      const data = snapshot.val() || {};
-      wallets = [];
-      for (const [key, sub] of Object.entries(data)) {
-        (sub.addresses || []).forEach(addr => {
-          wallets.push({ address: addr, balance: 0 });
-        });
-      }
-      renderWallets();
-    });
-
-    // 9️⃣ 定时刷新价格和余额
+    // 初始化流程
     fetchBTCPrice();
+    fetchSubscribers();
+
+    // 定时刷新
     setInterval(fetchBTCPrice, 60000);
     setInterval(updateBalances, 60000);
   </script>
