@@ -3,35 +3,29 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>BTC 地址追踪器</title>
+  <title>BTC 地址追踪器（Firebase版）</title>
   <style>
     body { font-family: Arial, sans-serif; margin: 0; background: #f4f4f4; }
     h1 { text-align: center; padding: 15px; }
     #priceTimestamp { text-align: center; font-size: 14px; color: #555; margin-bottom: 10px; }
-    #addForm { display: flex; flex-direction: column; align-items: center; margin: 10px; gap: 5px; }
-    #addForm input { width: 90%; max-width: 400px; padding: 8px; }
-    #addForm button { padding: 8px 16px; margin-top: 5px; }
     #wallets { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin: 10px; }
     .card { background: white; padding: 15px; border-radius: 12px; box-shadow: 0 2px 6px rgba(0,0,0,0.15); width: 90%; max-width: 400px; position: relative; }
     .address { font-size: 14px; word-break: break-all; margin-bottom: 5px; }
     .balance { font-size: 18px; font-weight: bold; margin-bottom: 5px; }
     .usdValue { font-size: 16px; color: #333; margin-bottom: 5px; }
-    .delete-btn { position: absolute; top: 5px; right: 8px; background: red; color: white; border: none; border-radius: 50%; width: 24px; height: 24px; cursor: pointer; }
     #totals { text-align: center; margin: 20px 0; font-size: 18px; }
     @media (max-width: 600px) {
       .card { width: 95%; }
     }
   </style>
+
+  <!-- Firebase SDK -->
+  <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-database.js"></script>
 </head>
 <body>
-  <h1>BTC 地址追踪器</h1>
+  <h1>BTC 地址追踪器（Firebase版）</h1>
   <div id="priceTimestamp">加载BTC价格中...</div>
-
-  <form id="addForm">
-    <input type="text" id="btcAddress" placeholder="输入BTC地址" required />
-    <input type="text" id="email" placeholder="订阅邮箱（可选）" />
-    <button type="submit">添加地址并订阅提醒</button>
-  </form>
 
   <div id="totals">
     总BTC数量: <span id="totalBTC">0</span> BTC<br>
@@ -41,9 +35,25 @@
   <div id="wallets"></div>
 
   <script>
-    let wallets = JSON.parse(localStorage.getItem("btcWallets") || "[]");
+    // 1️⃣ 初始化 Firebase
+    const firebaseConfig = {
+            apiKey: "AIzaSyAFPHvDz67gLXFRkG8WZCdn8hZhPR49z6w",
+            authDomain: "btc-tracker-85578.firebaseapp.com",
+            databaseURL: "https://btc-tracker-85578-default-rtdb.firebaseio.com",
+            projectId: "btc-tracker-85578",
+            storageBucket: "btc-tracker-85578.firebasestorage.app",
+            messagingSenderId: "222986415665",
+            appId: "1:222986415665:web:468b4542f808dc7395af10",
+            measurementId: "G-10QM1M65QE"
+            };
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.database();
+
+    // 2️⃣ 全局变量
+    let wallets = [];
     let btcPrice = 0;
 
+    // 3️⃣ 获取 BTC 价格
     async function fetchBTCPrice() {
       try {
         const res = await fetch("https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd");
@@ -57,6 +67,7 @@
       }
     }
 
+    // 4️⃣ 获取地址余额
     async function fetchBalance(address) {
       try {
         const res = await fetch(`https://blockstream.info/api/address/${address}`);
@@ -70,10 +81,7 @@
       }
     }
 
-    function saveWallets() {
-      localStorage.setItem("btcWallets", JSON.stringify(wallets));
-    }
-
+    // 5️⃣ 渲染卡片
     function renderWallets() {
       const container = document.getElementById("wallets");
       container.innerHTML = "";
@@ -84,13 +92,13 @@
           <div class="address">${wallet.address}</div>
           <div class="balance" id="balance-${idx}">余额: 加载中...</div>
           <div class="usdValue" id="usd-${idx}">价值: 加载中...</div>
-          <button class="delete-btn" onclick="deleteWallet(${idx})">×</button>
         `;
         container.appendChild(card);
       });
       updateBalances();
     }
 
+    // 6️⃣ 更新余额显示
     async function updateBalances() {
       let totalBTC = 0;
       for (let i = 0; i < wallets.length; i++) {
@@ -103,58 +111,29 @@
       }
       document.getElementById("totalBTC").innerText = totalBTC;
       document.getElementById("totalUSD").innerText = (totalBTC * btcPrice).toLocaleString();
-      saveWallets();
     }
 
+    // 7️⃣ 更新汇总
     function updateTotals() {
       let totalBTC = wallets.reduce((sum, w) => sum + (w.balance || 0), 0);
       document.getElementById("totalBTC").innerText = totalBTC;
       document.getElementById("totalUSD").innerText = (totalBTC * btcPrice).toLocaleString();
     }
 
-    function deleteWallet(idx) {
-      wallets.splice(idx, 1);
-      saveWallets();
-      renderWallets();
-    }
-
-    document.getElementById("addForm").addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const addr = document.getElementById("btcAddress").value.trim();
-      const email = document.getElementById("email").value.trim();
-
-      if (!addr) {
-        alert("BTC地址必填");
-        return;
+    // 8️⃣ 监听 Firebase 数据变化
+    db.ref("subscribers").on("value", snapshot => {
+      const data = snapshot.val() || {};
+      wallets = [];
+      for (const [key, sub] of Object.entries(data)) {
+        (sub.addresses || []).forEach(addr => {
+          wallets.push({ address: addr, balance: 0 });
+        });
       }
-
-      wallets.push({ address: addr, balance: 0 });
-      saveWallets();
       renderWallets();
-
-      if (email) {
-        try {
-          const res = await fetch("/api/subscribe", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ email, addresses: wallets.map(w => w.address) })
-          });
-          const result = await res.json();
-          alert(result.message || "订阅请求已发送");
-        } catch {
-          alert("订阅请求发送失败");
-        }
-      }
-
-      document.getElementById("btcAddress").value = "";
-      document.getElementById("email").value = "";
     });
 
-    // 初次加载
+    // 9️⃣ 定时刷新价格和余额
     fetchBTCPrice();
-    renderWallets();
-
-    // 定时刷新价格和余额
     setInterval(fetchBTCPrice, 60000);
     setInterval(updateBalances, 60000);
   </script>
