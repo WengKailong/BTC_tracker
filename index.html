@@ -11,9 +11,13 @@
     #wallets { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin: 10px; }
     .card { background: white; padding: 15px; border-radius: 12px; box-shadow: 0 2px 6px rgba(0,0,0,0.15); width: 90%; max-width: 400px; position: relative; }
     .address { font-size: 14px; word-break: break-all; margin-bottom: 5px; }
+    .email { font-size: 13px; color: #666; margin-bottom: 5px; }
     .balance { font-size: 18px; font-weight: bold; margin-bottom: 5px; }
     .usdValue { font-size: 16px; color: #333; margin-bottom: 5px; }
     #totals { text-align: center; margin: 20px 0; font-size: 18px; }
+    @media (max-width: 600px) {
+      .card { width: 95%; }
+    }
   </style>
 </head>
 <body>
@@ -28,9 +32,10 @@
   <div id="wallets"></div>
 
   <script>
+    let wallets = [];
     let btcPrice = 0;
-    let wallets = []; // {address, balance}
 
+    // 1️⃣ 获取BTC价格
     async function fetchBTCPrice() {
       try {
         const res = await fetch("https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd");
@@ -44,34 +49,65 @@
       }
     }
 
+    // 2️⃣ 从后端获取Firebase subscribers数据，并去重
     async function fetchSubscribers() {
-      const res = await fetch("/api/get-subscribers");
-      const data = await res.json();
-      // data: { key1: {addresses:[], email:..}, ... }
-      wallets = [];
-      for (const [key, sub] of Object.entries(data)) {
-        (sub.addresses || []).forEach(addr => {
-          wallets.push({ address: addr, balance: 0 });
-        });
+      try {
+        const res = await fetch("/api/get-subscribers");
+        const data = await res.json();
+
+        const addrMap = {}; // { addr: { emails: [], balance: 0 } }
+
+        for (const [key, sub] of Object.entries(data)) {
+          const email = sub.email || "";
+          (sub.addresses || []).forEach(addr => {
+            if (!addrMap[addr]) {
+              addrMap[addr] = { emails: [], balance: 0 };
+            }
+            if (email && !addrMap[addr].emails.includes(email)) {
+              addrMap[addr].emails.push(email);
+            }
+          });
+        }
+
+        wallets = Object.entries(addrMap).map(([address, info]) => ({
+          address,
+          balance: 0,
+          emails: info.emails
+        }));
+
+        renderWallets();
+      } catch (err) {
+        console.error("获取subscribers失败", err);
       }
-      renderWallets();
     }
 
+    // 3️⃣ 获取单地址余额
     async function fetchBalance(address) {
-      const res = await fetch(`https://blockstream.info/api/address/${address}`);
-      if (!res.ok) return 0;
-      const data = await res.json();
-      return (data.chain_stats.funded_txo_sum - data.chain_stats.spent_txo_sum) / 1e8;
+      try {
+        const res = await fetch(`https://blockstream.info/api/address/${address}`);
+        if (!res.ok) return 0;
+        const data = await res.json();
+        const satoshi = data.chain_stats.funded_txo_sum - data.chain_stats.spent_txo_sum;
+        return satoshi / 1e8;
+      } catch (err) {
+        console.error("获取余额失败", err);
+        return 0;
+      }
     }
 
+    // 4️⃣ 渲染地址卡片
     function renderWallets() {
       const container = document.getElementById("wallets");
       container.innerHTML = "";
       wallets.forEach((wallet, idx) => {
         const card = document.createElement("div");
         card.className = "card";
+        const emailList = wallet.emails && wallet.emails.length
+          ? `<div class="email">订阅邮箱: ${wallet.emails.join(", ")}</div>`
+          : "";
         card.innerHTML = `
           <div class="address">${wallet.address}</div>
+          ${emailList}
           <div class="balance" id="balance-${idx}">余额: 加载中...</div>
           <div class="usdValue" id="usd-${idx}">价值: 加载中...</div>
         `;
@@ -80,6 +116,7 @@
       updateBalances();
     }
 
+    // 5️⃣ 更新所有余额
     async function updateBalances() {
       let totalBTC = 0;
       for (let i = 0; i < wallets.length; i++) {
@@ -95,16 +132,16 @@
     }
 
     function updateTotals() {
-      const totalBTC = wallets.reduce((sum, w) => sum + (w.balance || 0), 0);
+      let totalBTC = wallets.reduce((sum, w) => sum + (w.balance || 0), 0);
       document.getElementById("totalBTC").innerText = totalBTC;
       document.getElementById("totalUSD").innerText = (totalBTC * btcPrice).toLocaleString();
     }
 
-    // 初始化流程
+    // 6️⃣ 初次加载
     fetchBTCPrice();
     fetchSubscribers();
 
-    // 定时刷新
+    // 定时刷新价格和余额
     setInterval(fetchBTCPrice, 60000);
     setInterval(updateBalances, 60000);
   </script>
