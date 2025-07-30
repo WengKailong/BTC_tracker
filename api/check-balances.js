@@ -85,4 +85,26 @@ export async function checkBalances() {
         // 记录新余额
         updates[`${key}/lastBalances/${addr}`] = newBalance;
       } catch (err) {
-        console.error(`获取地址余额失败 ${addr}`, err.me
+        console.error(`获取地址余额失败 ${addr}`, err.message);
+      }
+    }
+  }
+
+  // 更新 Firebase 中的余额
+  if (Object.keys(updates).length > 0) {
+    await db.ref("subscribers").update(updates);
+  }
+
+  // 给每个邮箱发送汇总邮件
+  for (const [email, changes] of Object.entries(changesByEmail)) {
+    await sendMail(email, changes);
+    console.log(`已发送余额变化提醒给 ${email}`);
+  }
+
+  console.log("余额检查完成");
+}
+
+// 如果是直接运行 node scripts/check-balances.js
+if (process.argv[1].includes("check-balances.js")) {
+  checkBalances().then(() => process.exit(0));
+}
