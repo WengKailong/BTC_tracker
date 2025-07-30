@@ -1,8 +1,9 @@
-// scripts/check-balances.js
+// api/check-balances.js
 import admin from "firebase-admin";
+import fetch from "node-fetch";
 import nodemailer from "nodemailer";
-import fetch from "node-fetch"; // 如果是 Node 18+ 可直接用 fetch
 
+// 初始化 Firebase Admin
 if (!process.env.FIREBASE_SERVICE_ACCOUNT) {
   throw new Error("Missing FIREBASE_SERVICE_ACCOUNT");
 }
@@ -18,17 +19,24 @@ if (!admin.apps.length) {
 
 const db = admin.database();
 
-// 获取 BTC 地址余额（示例用 blockstream API，可换成其他）
-async function getBalance(address) {
-  const url = `https://blockstream.info/api/address/${address}`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`获取余额失败: ${address}`);
-  const data = await res.json();
-  return data.chain_stats.funded_txo_sum / 1e8 - data.chain_stats.spent_txo_sum / 1e8;
+// 获取 BTC 地址余额
+async function fetchBalance(address) {
+  try {
+    const res = await fetch(`https://blockstream.info/api/address/${address}`);
+    if (!res.ok) return 0;
+    const data = await res.json();
+    const satoshi = data.chain_stats.funded_txo_sum - data.chain_stats.spent_txo_sum;
+    return satoshi / 1e8;
+  } catch (err) {
+    console.error("获取余额失败", address, err);
+    return 0;
+  }
 }
 
-// 邮件发送
-async function sendMail(email, changes) {
+// 发送邮件通知
+async function sendNotifications(notifications) {
+  if (!notifications.length) return;
+
   const transporter = nodemailer.createTransport({
     host: "smtp-relay.brevo.com",
     port: 587,
@@ -39,72 +47,106 @@ async function sendMail(email, changes) {
     },
   });
 
-  const htmlChanges = changes.map(
-    c => `<li>${c.address}：${c.oldBalance} → ${c.newBalance} BTC</li>`
-  ).join('');
-
-  const mailOptions = {
-    from: `"BTC监控" <wengkailong@gmail.com>`,
-    to: email,
-    subject: 'BTC 地址余额变化提醒',
-    html: `
+  for (const { email, changedBalances } of notifications) {
+    const html = `
       <h3>以下 BTC 地址余额发生变化：</h3>
-      <ul>${htmlChanges}</ul>
-      <p>这是系统自动提醒，请勿回复。</p>
-    `,
-  };
+      <ul>
+        ${Object.entries(changedBalances)
+          .map(([addr, { old, new: now }]) => 
+            `<li>${addr}: ${old} → ${now} BTC</li>`
+          )
+          .join("")}
+      </ul>
+    `;
 
-  await transporter.sendMail(mailOptions);
+    await transporter.sendMail({
+      from: `"BTC监控" <wengkailong@gmail.com>`,
+      to: email,
+      subject: "BTC 地址余额变化提醒",
+      html,
+    });
+
+    console.log(`已发送通知给 ${email}`);
+  }
 }
 
-export async function checkBalances() {
+// 核心逻辑
+async function checkBalances() {
+  console.log("开始检查余额变化...");
+
   const snapshot = await db.ref("subscribers").once("value");
   const subscribers = snapshot.val() || {};
 
-  const updates = {};
-  const changesByEmail = {};
+  const notifications = [];
+  const emailAddressMap = {}; // email -> {addr: lastBalance}
 
-  for (const [key, subscriber] of Object.entries(subscribers)) {
-    const { email, addresses = [], lastBalances = {} } = subscriber;
+  // 合并相同邮箱的订阅记录，避免重复通知
+  for (const key of Object.keys(subscribers)) {
+    const sub = subscribers[key];
+    const email = sub.email;
+    const addresses = sub.addresses || [];
+    const lastBalances = sub.lastBalances || {};
+
+    if (!emailAddressMap[email]) {
+      emailAddressMap[email] = { addresses: new Set(), lastBalances: {} };
+    }
+
+    // 合并地址
+    addresses.forEach(addr => emailAddressMap[email].addresses.add(addr));
+
+    // 合并最后余额记录
+    Object.entries(lastBalances).forEach(([addr, bal]) => {
+      emailAddressMap[email].lastBalances[addr] = bal;
+    });
+  }
+
+  // 遍历每个邮箱检查余额
+  for (const [email, { addresses, lastBalances }] of Object.entries(emailAddressMap)) {
+    const changedBalances = {};
+    const newBalances = { ...lastBalances };
 
     for (const addr of addresses) {
-      try {
-        const newBalance = await getBalance(addr);
-        const oldBalance = lastBalances[addr] ?? newBalance;
+      const balance = await fetchBalance(addr);
+      newBalances[addr] = balance;
 
-        // 发现余额变化
-        if (newBalance !== oldBalance) {
-          if (!changesByEmail[email]) changesByEmail[email] = [];
-          changesByEmail[email].push({
-            address: addr,
-            oldBalance,
-            newBalance,
-          });
-        }
-
-        // 记录新余额
-        updates[`${key}/lastBalances/${addr}`] = newBalance;
-      } catch (err) {
-        console.error(`获取地址余额失败 ${addr}`, err.message);
+      if (balance !== lastBalances[addr]) {
+        changedBalances[addr] = { old: lastBalances[addr] || 0, new: balance };
       }
+    }
+
+    // 更新数据库中所有该邮箱的记录
+    for (const key of Object.keys(subscribers)) {
+      if (subscribers[key].email === email) {
+        await db.ref(`subscribers/${key}/lastBalances`).set(newBalances);
+      }
+    }
+
+    if (Object.keys(changedBalances).length > 0) {
+      notifications.push({ email, changedBalances });
     }
   }
 
-  // 更新 Firebase 中的余额
-  if (Object.keys(updates).length > 0) {
-    await db.ref("subscribers").update(updates);
-  }
+  // 发送邮件通知
+  await sendNotifications(notifications);
 
-  // 给每个邮箱发送汇总邮件
-  for (const [email, changes] of Object.entries(changesByEmail)) {
-    await sendMail(email, changes);
-    console.log(`已发送余额变化提醒给 ${email}`);
-  }
-
-  console.log("余额检查完成");
+  console.log(`余额检查完成，共发送 ${notifications.length} 封通知`);
 }
 
-// 如果是直接运行 node scripts/check-balances.js
-if (process.argv[1].includes("check-balances.js")) {
-  checkBalances().then(() => process.exit(0));
+// 默认导出函数，兼容 API Route & Vercel Cron
+export default async function handler(req, res) {
+  if (req && req.method && req.method !== "POST") {
+    return res.status(405).json({ message: "Method Not Allowed" });
+  }
+
+  try {
+    await checkBalances();
+    if (res) {
+      return res.status(200).json({ message: "余额检查完成" });
+    }
+  } catch (err) {
+    console.error("检查余额失败", err);
+    if (res) {
+      return res.status(500).json({ message: "检查余额失败" });
+    }
+  }
 }
