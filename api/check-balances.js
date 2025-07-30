@@ -134,19 +134,12 @@ async function checkBalances() {
 
 // 默认导出函数，兼容 API Route & Vercel Cron
 export default async function handler(req, res) {
-  if (req && req.method && req.method !== "POST") {
-    return res.status(405).json({ message: "Method Not Allowed" });
-  }
-
   try {
     await checkBalances();
-    if (res) {
-      return res.status(200).json({ message: "余额检查完成" });
-    }
+    return res.status(200).json({ message: "余额检查完成" });
   } catch (err) {
     console.error("检查余额失败", err);
-    if (res) {
-      return res.status(500).json({ message: "检查余额失败" });
-    }
+    return res.status(500).json({ message: "检查余额失败" });
   }
 }
+
