@@ -1,10 +1,10 @@
-import fetch from "node-fetch";
-import nodemailer from "nodemailer";
+// scripts/check-balances.js
 import admin from "firebase-admin";
+import nodemailer from "nodemailer";
+import fetch from "node-fetch"; // 如果是 Node 18+ 可直接用 fetch
 
-// 1️⃣ 初始化 Firebase
 if (!process.env.FIREBASE_SERVICE_ACCOUNT) {
-  throw new Error("Missing FIREBASE_SERVICE_ACCOUNT environment variable");
+  throw new Error("Missing FIREBASE_SERVICE_ACCOUNT");
 }
 
 const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
@@ -18,72 +18,71 @@ if (!admin.apps.length) {
 
 const db = admin.database();
 
-// 2️⃣ 配置 Brevo 邮件
-const transporter = nodemailer.createTransport({
-  host: "smtp-relay.brevo.com",
-  port: 587,
-  auth: {
-    user: process.env.BREVO_USER,
-    pass: process.env.BREVO_KEY,
-  },
-});
-
-// 3️⃣ 获取 BTC 地址余额
-async function getBalance(addr) {
-  const res = await fetch(`https://blockstream.info/api/address/${addr}`);
-  if (!res.ok) return 0;
+// 获取 BTC 地址余额（示例用 blockstream API，可换成其他）
+async function getBalance(address) {
+  const url = `https://blockstream.info/api/address/${address}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`获取余额失败: ${address}`);
   const data = await res.json();
-  const satoshi = data.chain_stats.funded_txo_sum - data.chain_stats.spent_txo_sum;
-  return satoshi / 1e8;
+  return data.chain_stats.funded_txo_sum / 1e8 - data.chain_stats.spent_txo_sum / 1e8;
 }
 
-// 4️⃣ 发送邮件
-async function sendEmail(email, addr, oldBal, newBal) {
+// 邮件发送
+async function sendMail(email, changes) {
+  const transporter = nodemailer.createTransport({
+    host: "smtp-relay.brevo.com",
+    port: 587,
+    secure: false,
+    auth: {
+      user: process.env.BREVO_USER,
+      pass: process.env.BREVO_KEY,
+    },
+  });
+
+  const htmlChanges = changes.map(
+    c => `<li>${c.address}：${c.oldBalance} → ${c.newBalance} BTC</li>`
+  ).join('');
+
   const mailOptions = {
     from: `"BTC监控" <wengkailong@gmail.com>`,
     to: email,
-    subject: "BTC地址余额变化提醒",
+    subject: 'BTC 地址余额变化提醒',
     html: `
-      <h3>您的BTC地址余额发生变化</h3>
-      <p>地址: ${addr}</p>
-      <p>原余额: ${oldBal} BTC</p>
-      <p>新余额: ${newBal} BTC</p>
+      <h3>以下 BTC 地址余额发生变化：</h3>
+      <ul>${htmlChanges}</ul>
+      <p>这是系统自动提醒，请勿回复。</p>
     `,
   };
 
   await transporter.sendMail(mailOptions);
 }
 
-// 5️⃣ 主处理逻辑
-export default async function handler(req, res) {
+export async function checkBalances() {
   const snapshot = await db.ref("subscribers").once("value");
   const subscribers = snapshot.val() || {};
 
-  const updates = [];
+  const updates = {};
+  const changesByEmail = {};
 
-  for (const [key, sub] of Object.entries(subscribers)) {
-    const addresses = sub.addresses || [];
-    const lastBalances = sub.lastBalances || {};
+  for (const [key, subscriber] of Object.entries(subscribers)) {
+    const { email, addresses = [], lastBalances = {} } = subscriber;
 
     for (const addr of addresses) {
-      const oldBal = lastBalances[addr] ?? null;
-      const newBal = await getBalance(addr);
+      try {
+        const newBalance = await getBalance(addr);
+        const oldBalance = lastBalances[addr] ?? newBalance;
 
-      if (oldBal === null) {
-        // 初始化，不发邮件
-        await db.ref(`subscribers/${key}/lastBalances/${addr}`).set(newBal);
-        continue;
-      }
+        // 发现余额变化
+        if (newBalance !== oldBalance) {
+          if (!changesByEmail[email]) changesByEmail[email] = [];
+          changesByEmail[email].push({
+            address: addr,
+            oldBalance,
+            newBalance,
+          });
+        }
 
-      if (oldBal !== newBal) {
-        // 余额变化 -> 更新数据库 & 发邮件
-        await db.ref(`subscribers/${key}/lastBalances/${addr}`).set(newBal);
-        await sendEmail(sub.email, addr, oldBal, newBal);
-
-        updates.push({ key, addr, old: oldBal, new: newBal });
-      }
-    }
-  }
-
-  res.json({ message: "Balance check complete", updates });
-}
+        // 记录新余额
+        updates[`${key}/lastBalances/${addr}`] = newBalance;
+      } catch (err) {
+        console.error(`获取地址余额失败 ${addr}`, err.me
