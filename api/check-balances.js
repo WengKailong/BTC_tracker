@@ -72,13 +72,13 @@ async function sendNotifications(notifications) {
 
 // 核心逻辑
 async function checkBalances() {
-  console.log("开始检查余额变化...");
+  console.log(`[check-balances] 任务触发于 ${new Date().toISOString()}`);
 
   const snapshot = await db.ref("subscribers").once("value");
   const subscribers = snapshot.val() || {};
 
   const notifications = [];
-  const emailAddressMap = {}; // email -> {addr: lastBalance}
+  const emailAddressMap = {}; // email -> {addresses:Set, lastBalances: {}}
 
   // 合并相同邮箱的订阅记录，避免重复通知
   for (const key of Object.keys(subscribers)) {
@@ -132,8 +132,12 @@ async function checkBalances() {
   console.log(`余额检查完成，共发送 ${notifications.length} 封通知`);
 }
 
-// 默认导出函数，兼容 API Route & Vercel Cron
+// 默认导出函数，兼容 GET & POST
 export default async function handler(req, res) {
+  if (req.method !== "GET" && req.method !== "POST") {
+    return res.status(405).json({ message: "Method Not Allowed" });
+  }
+
   try {
     await checkBalances();
     return res.status(200).json({ message: "余额检查完成" });
@@ -142,4 +146,3 @@ export default async function handler(req, res) {
     return res.status(500).json({ message: "检查余额失败" });
   }
 }
-
