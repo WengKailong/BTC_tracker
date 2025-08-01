@@ -13,4 +13,4 @@ jobs:
       - name: Call API
         run: |
           echo "Triggering check-balances API..."
-          curl -X GET https://your-vercel-domain.vercel.app/api/check-balances
+          curl -X GET https://btc-tracker-alpha.vercel.app/api/check-balances
