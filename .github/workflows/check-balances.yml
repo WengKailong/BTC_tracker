@@ -1,0 +1,16 @@
+name: Call Check Balances API
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'  # 每10分钟执行一次
+  workflow_dispatch:        # 支持手动触发
+
+jobs:
+  call-api:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Call API
+        run: |
+          echo "Triggering check-balances API..."
+          curl -X GET https://your-vercel-domain.vercel.app/api/check-balances
