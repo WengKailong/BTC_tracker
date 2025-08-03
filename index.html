@@ -148,24 +148,42 @@
     }
 
     async function fetchSubscribers() {
-      const res = await fetch("/api/get-subscribers");
-      const data = await res.json();
-      addressMap = {};
-      for (const sub of Object.values(data)) {
-        const email = sub.email || "未填写邮箱";
-        const addresses = sub.addresses || [];
-        addresses.forEach(addr => {
-          if (!addressMap[addr]) {
-            addressMap[addr] = { balance: 0, emails: new Set() };
-          }
-          if (email !== "未填写邮箱") {
-            addressMap[addr].emails.add(email);
-          }
-        });
+      const urlSecret = new URLSearchParams(location.search).get("secret");
+      if (!urlSecret) {
+        alert("无权访问：缺少 secret");
+        document.body.innerHTML = "<h2 style='text-align:center;margin-top:40px;'>无权访问</h2>";
+        return;
       }
-      renderWallets();
-      updateBalances();
+    
+      try {
+        const res = await fetch(`/api/get-subscribers?secret=${urlSecret}`);
+        if (res.status === 403) {
+          document.body.innerHTML = "<h2 style='text-align:center;margin-top:40px;'>无权访问</h2>";
+          return;
+        }
+        const data = await res.json();
+        
+        // ...保持后续渲染逻辑不变
+        addressMap = {};
+        for (const sub of Object.values(data)) {
+          const email = sub.email || "未填写邮箱";
+          const addresses = sub.addresses || [];
+          addresses.forEach(addr => {
+            if (!addressMap[addr]) {
+              addressMap[addr] = { balance: 0, emails: new Set() };
+            }
+            if (email !== "未填写邮箱") {
+              addressMap[addr].emails.add(email);
+            }
+          });
+        }
+        renderWallets();
+        updateBalances();
+      } catch (err) {
+        alert("加载订阅数据失败");
+      }
     }
+
 
     async function fetchBTCPrice() {
       try {
