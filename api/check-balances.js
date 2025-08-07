@@ -72,6 +72,9 @@ async function sendNotifications(notifications) {
 
 // 核心逻辑
 async function checkBalances() {
+  const addressSnapshots = {};  // address -> latest balance
+  let btcPrice = 0;
+
   console.log(`[check-balances] 任务触发于 ${new Date().toISOString()}`);
 
   const snapshot = await db.ref("subscribers").once("value");
@@ -107,12 +110,14 @@ async function checkBalances() {
 
     for (const addr of addresses) {
       const balance = await fetchBalance(addr);
+      addressSnapshots[addr] = balance; // ✅ 记录每个地址当前余额
       newBalances[addr] = balance;
-
+    
       if (balance !== lastBalances[addr]) {
         changedBalances[addr] = { old: lastBalances[addr] || 0, new: balance };
       }
     }
+
 
     // 更新数据库中所有该邮箱的记录
     for (const key of Object.keys(subscribers)) {
@@ -130,6 +135,24 @@ async function checkBalances() {
   await sendNotifications(notifications);
 
   console.log(`余额检查完成，共发送 ${notifications.length} 封通知`);
+
+  // 6️⃣ 写入历史记录
+  const totalBTC = Object.values(emailAddressMap).reduce((sum, { addresses }) => {
+    return sum + [...addresses].reduce((s, addr) => s + (addressSnapshots[addr] || 0), 0);
+  }, 0);
+  
+  const timestamp = new Date().toISOString();
+  const historyRef = db.ref(`history/${timestamp}`);
+  
+  const historyEntry = {
+    totalBTC,
+    totalUSD: +(totalBTC * btcPrice).toFixed(2),
+    addresses: addressSnapshots, // { addr1: bal1, addr2: bal2, ... }
+  };
+  
+  await historyRef.set(historyEntry);
+  console.log(`📈 历史记录写入成功 @ ${timestamp}`);
+
 }
 
 // 默认导出函数，兼容 GET & POST
