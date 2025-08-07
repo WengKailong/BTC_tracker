@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>BTC 地址追踪器</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
     body {
       margin: 0;
@@ -40,26 +41,23 @@
       border-radius: 12px;
       box-shadow: 0 2px 6px rgba(0,0,0,0.1);
     }
-    #addForm input {
+    #addForm input, #addForm button {
       padding: 12px;
-      border: 1px solid #ddd;
       border-radius: 8px;
       font-size: 14px;
+    }
+    #addForm input {
+      border: 1px solid #ddd;
       outline: none;
-      transition: border-color 0.2s;
     }
     #addForm input:focus {
       border-color: #4a90e2;
     }
     #addForm button {
-      padding: 12px;
       background: #4a90e2;
       color: white;
       border: none;
-      border-radius: 8px;
-      font-size: 15px;
       cursor: pointer;
-      transition: background 0.2s;
     }
     #addForm button:hover {
       background: #357ABD;
@@ -68,7 +66,6 @@
       text-align: center;
       margin: 15px 0;
       font-size: 16px;
-      color: #444;
     }
     #wallets {
       display: grid;
@@ -83,38 +80,19 @@
       padding: 16px;
       border-radius: 12px;
       box-shadow: 0 2px 10px rgba(0,0,0,0.08);
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
       word-break: break-all;
-      transition: transform 0.15s ease;
-    }
-    .card:hover {
-      transform: translateY(-3px);
-    }
-    .address {
-      font-size: 13px;
-      color: #555;
-    }
-    .balance {
-      font-size: 18px;
-      font-weight: bold;
-      color: #222;
-    }
-    .usdValue {
-      font-size: 15px;
-      color: #4a90e2;
     }
     .emails {
       font-size: 12px;
       color: #888;
       border-top: 1px solid #eee;
-      padding-top: 6px;
       margin-top: 6px;
+      padding-top: 6px;
     }
-    @media (max-width: 480px) {
-      header h1 { font-size: 20px; }
-      #addForm { margin: 10px; padding: 12px; }
+    canvas {
+      max-width: 800px;
+      margin: 20px auto;
+      display: block;
     }
   </style>
 </head>
@@ -131,9 +109,10 @@
   </form>
 
   <div id="totals">
-    总BTC数量: <span id="totalBTC">0</span> BTC
-    &nbsp;|&nbsp; 总价值: $<span id="totalUSD">0</span>
+    总BTC数量: <span id="totalBTC">0</span> BTC &nbsp;|&nbsp; 总价值: $<span id="totalUSD">0</span>
   </div>
+
+  <canvas id="chart"></canvas>
 
   <div id="wallets"></div>
 
@@ -154,7 +133,6 @@
         document.body.innerHTML = "<h2 style='text-align:center;margin-top:40px;'>无权访问</h2>";
         return;
       }
-    
       try {
         const res = await fetch(`/api/get-subscribers?secret=${urlSecret}`);
         if (res.status === 403) {
@@ -162,19 +140,13 @@
           return;
         }
         const data = await res.json();
-        
-        // ...保持后续渲染逻辑不变
         addressMap = {};
         for (const sub of Object.values(data)) {
           const email = sub.email || "未填写邮箱";
           const addresses = sub.addresses || [];
           addresses.forEach(addr => {
-            if (!addressMap[addr]) {
-              addressMap[addr] = { balance: 0, emails: new Set() };
-            }
-            if (email !== "未填写邮箱") {
-              addressMap[addr].emails.add(email);
-            }
+            if (!addressMap[addr]) addressMap[addr] = { balance: 0, emails: new Set() };
+            if (email !== "未填写邮箱") addressMap[addr].emails.add(email);
           });
         }
         renderWallets();
@@ -183,7 +155,6 @@
         alert("加载订阅数据失败");
       }
     }
-
 
     async function fetchBTCPrice() {
       try {
@@ -217,9 +188,9 @@
         const card = document.createElement("div");
         card.className = "card";
         card.innerHTML = `
-          <div class="address">地址：${addr}</div>
-          <div class="balance" id="balance-${idx}">余额: 加载中...</div>
-          <div class="usdValue" id="usd-${idx}">价值: 加载中...</div>
+          <div>地址：${addr}</div>
+          <div id="balance-${idx}">余额: 加载中...</div>
+          <div id="usd-${idx}">价值: 加载中...</div>
           <div class="emails">订阅邮箱: ${[...info.emails].map(maskEmail).join(", ") || "无"}</div>
         `;
         container.appendChild(card);
@@ -234,8 +205,7 @@
         const balance = await fetchBalance(addr);
         addressMap[addr].balance = balance;
         document.getElementById(`balance-${i}`).innerText = `余额: ${balance} BTC`;
-        const usdVal = btcPrice * balance;
-        document.getElementById(`usd-${i}`).innerText = `价值: $${usdVal.toLocaleString()}`;
+        document.getElementById(`usd-${i}`).innerText = `价值: $${(balance * btcPrice).toLocaleString()}`;
         totalBTC += balance;
       }
       document.getElementById("totalBTC").innerText = totalBTC;
@@ -248,11 +218,44 @@
       document.getElementById("totalUSD").innerText = (totalBTC * btcPrice).toLocaleString();
     }
 
+    async function drawHistoryChart() {
+      try {
+        const res = await fetch("/api/get-history");
+        const { history } = await res.json();
+
+        const labels = history.map(i => new Date(i.time).toLocaleString());
+        const data = history.map(i => i.totalBTC);
+
+        new Chart(document.getElementById("chart"), {
+          type: "line",
+          data: {
+            labels,
+            datasets: [{
+              label: "总BTC数量变化",
+              data,
+              borderColor: "#4a90e2",
+              fill: false,
+              tension: 0.2
+            }]
+          },
+          options: {
+            responsive: true,
+            scales: {
+              x: { display: true },
+              y: { beginAtZero: true }
+            }
+          }
+        });
+      } catch (err) {
+        console.error("历史图表加载失败", err);
+      }
+    }
+
     document.getElementById("addForm").addEventListener("submit", async (e) => {
       e.preventDefault();
       const addr = document.getElementById("btcAddress").value.trim();
       const email = document.getElementById("email").value.trim();
-      if (!addr) { alert("BTC地址必填"); return; }
+      if (!addr) return alert("BTC地址必填");
       try {
         const res = await fetch("/api/subscribe", {
           method: "POST",
@@ -271,6 +274,7 @@
 
     fetchBTCPrice();
     fetchSubscribers();
+    drawHistoryChart();
     setInterval(fetchBTCPrice, 60000);
     setInterval(updateBalances, 60000);
   </script>
