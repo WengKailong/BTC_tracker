@@ -76,6 +76,15 @@ async function checkBalances() {
   let btcPrice = 0;
 
   console.log(`[check-balances] 任务触发于 ${new Date().toISOString()}`);
+  // ✅ 获取 BTC 价格
+  try {
+    const priceRes = await fetch("https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd");
+    const priceData = await priceRes.json();
+    btcPrice = priceData.bitcoin.usd;
+    console.log(`当前BTC价格: $${btcPrice}`);
+  } catch (err) {
+    console.error("获取BTC价格失败", err);
+  }
 
   const snapshot = await db.ref("subscribers").once("value");
   const subscribers = snapshot.val() || {};
