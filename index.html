@@ -280,8 +280,10 @@
     }
 
     async function drawHistoryChart() {
+      const urlSecret = new URLSearchParams(location.search).get("secret");
+      if (!urlSecret) return;
       try {
-        const res = await fetch("/api/get-history?secret=你的secret");
+        const res = await fetch(`/api/get-history?secret=${urlSecret}`);
         const { history } = await res.json();
     
         console.log("📊 获取到历史数据：", history);
