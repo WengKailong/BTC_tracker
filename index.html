@@ -281,20 +281,16 @@
 
     async function drawHistoryChart() {
       const urlSecret = new URLSearchParams(location.search).get("secret");
-      if (!urlSecret) {
-        console.warn("未提供 secret，跳过历史图表加载");
-        return;
-      }
+      if (!urlSecret) return;
     
       try {
         const res = await fetch(`/api/get-history?secret=${urlSecret}`);
-        if (res.status === 403) {
-          console.warn("历史接口访问被拒绝（secret无效）");
-          return;
-        }
-    
         const { history } = await res.json();
-        const labels = history.map(i => new Date(i.time).toLocaleString());
+    
+        const labels = history.map(i => {
+          const date = new Date(i.time);
+          return isNaN(date) ? "无效时间" : date.toLocaleString();
+        });
         const data = history.map(i => i.totalBTC);
     
         new Chart(document.getElementById("chart"), {
@@ -305,15 +301,30 @@
               label: "总BTC数量变化",
               data,
               borderColor: "#4a90e2",
-              fill: false,
-              tension: 0.2
+              backgroundColor: "rgba(74, 144, 226, 0.1)",
+              fill: true,
+              tension: 0.2,
+              pointRadius: 2,
             }]
           },
           options: {
             responsive: true,
+            plugins: {
+              legend: { display: true },
+              tooltip: { mode: 'index', intersect: false }
+            },
             scales: {
-              x: { display: true },
-              y: { beginAtZero: true }
+              x: {
+                ticks: {
+                  maxRotation: 60,
+                  minRotation: 30,
+                  autoSkip: true,
+                }
+              },
+              y: {
+                beginAtZero: true,
+                title: { display: true, text: 'BTC 总余额' }
+              }
             }
           }
         });
@@ -321,6 +332,7 @@
         console.error("历史图表加载失败", err);
       }
     }
+
 
 
     document.getElementById("addForm").addEventListener("submit", async (e) => {
