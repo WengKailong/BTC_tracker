@@ -17,22 +17,25 @@ if (!admin.apps.length) {
 const db = admin.database();
 
 export default async function handler(req, res) {
+  const { secret } = req.query;
+  if (!secret || secret !== process.env.MY_INDEX_SECRET) {
+    return res.status(403).json({ message: "Forbidden: invalid secret" });
+  }
+
   try {
     const snapshot = await db.ref("history").once("value");
-    const rawData = snapshot.val() || {};
-
-    // 结构化输出 [{ time, totalBTC, totalUSD }]
-    const history = Object.entries(rawData)
-      .map(([timestamp, data]) => ({
+    const raw = snapshot.val() || {};
+    const result = Object.entries(raw)
+      .map(([timestamp, val]) => ({
         time: timestamp,
-        totalBTC: data.totalBTC || 0,
-        totalUSD: data.totalUSD || 0,
+        totalBTC: val.totalBTC,
+        totalUSD: val.totalUSD,
       }))
-      .sort((a, b) => new Date(a.time) - new Date(b.time)); // 按时间升序
+      .sort((a, b) => new Date(a.time) - new Date(b.time));
 
-    res.status(200).json({ history });
+    res.status(200).json({ history: result });
   } catch (err) {
-    console.error("读取历史记录失败", err);
+    console.error("获取历史记录失败", err);
     res.status(500).json({ message: "Failed to fetch history" });
   }
 }
