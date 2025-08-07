@@ -150,8 +150,9 @@ async function checkBalances() {
     return sum + [...addresses].reduce((s, addr) => s + (addressSnapshots[addr] || 0), 0);
   }, 0);
   
-  const timestamp = new Date().toISOString();
+  const timestamp = new Date().toISOString().replace(/[.#$\[\]]/g, "_").replace(/:/g, "-");
   const historyRef = db.ref(`history/${timestamp}`);
+
   
   const historyEntry = {
     totalBTC,
