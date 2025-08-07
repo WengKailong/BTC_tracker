@@ -178,13 +178,6 @@
   <div id="wallets"></div>
 
   <script>
-    card.innerHTML = `
-      <div><strong>地址：</strong>${addr}</div>
-      <div class="balance" id="balance-${idx}"><strong>余额：</strong>加载中...</div>
-      <div class="usd usdValue" id="usd-${idx}"><strong>价值：</strong>加载中...</div>
-      <div class="emails"><strong>订阅邮箱：</strong>${[...info.emails].map(maskEmail).join(", ") || "无"}</div>
-    `;
-
     let btcPrice = 0;
     let addressMap = {}; // { address: { balance, emails: Set([...]) } }
 
@@ -256,10 +249,10 @@
         const card = document.createElement("div");
         card.className = "card";
         card.innerHTML = `
-          <div>地址：${addr}</div>
-          <div id="balance-${idx}">余额: 加载中...</div>
-          <div id="usd-${idx}">价值: 加载中...</div>
-          <div class="emails">订阅邮箱: ${[...info.emails].map(maskEmail).join(", ") || "无"}</div>
+          <div><strong>地址：</strong>${addr}</div>
+          <div class="balance" id="balance-${idx}"><strong>余额：</strong>加载中...</div>
+          <div class="usd usdValue" id="usd-${idx}"><strong>价值：</strong>加载中...</div>
+          <div class="emails"><strong>订阅邮箱：</strong>${[...info.emails].map(maskEmail).join(", ") || "无"}</div>
         `;
         container.appendChild(card);
       });
