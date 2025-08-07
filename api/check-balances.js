@@ -1,4 +1,3 @@
-// api/check-balances.js
 import admin from "firebase-admin";
 import fetch from "node-fetch";
 import nodemailer from "nodemailer";
@@ -52,7 +51,7 @@ async function sendNotifications(notifications) {
       <h3>以下 BTC 地址余额发生变化：</h3>
       <ul>
         ${Object.entries(changedBalances)
-          .map(([addr, { old, new: now }]) => 
+          .map(([addr, { old, new: now }]) =>
             `<li>${addr}: ${old} → ${now} BTC</li>`
           )
           .join("")}
@@ -72,27 +71,26 @@ async function sendNotifications(notifications) {
 
 // 核心逻辑
 async function checkBalances() {
-  const addressSnapshots = {};  // address -> latest balance
-  let btcPrice = 0;
-
   console.log(`[check-balances] 任务触发于 ${new Date().toISOString()}`);
-  // ✅ 获取 BTC 价格
-  try {
-    const priceRes = await fetch("https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd");
-    const priceData = await priceRes.json();
-    btcPrice = priceData.bitcoin.usd;
-    console.log(`当前BTC价格: $${btcPrice}`);
-  } catch (err) {
-    console.error("获取BTC价格失败", err);
-  }
 
   const snapshot = await db.ref("subscribers").once("value");
   const subscribers = snapshot.val() || {};
 
   const notifications = [];
-  const emailAddressMap = {}; // email -> {addresses:Set, lastBalances: {}}
+  const emailAddressMap = {}; // email -> { addresses: Set, lastBalances: {} }
+  const addressSnapshots = {}; // 每个地址的当前余额
+  let btcPrice = 0;
 
-  // 合并相同邮箱的订阅记录，避免重复通知
+  // 获取最新 BTC 价格（用于历史记录）
+  try {
+    const priceRes = await fetch("https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd");
+    const priceData = await priceRes.json();
+    btcPrice = priceData.bitcoin.usd;
+  } catch (err) {
+    console.error("获取BTC价格失败", err);
+  }
+
+  // 整理订阅数据
   for (const key of Object.keys(subscribers)) {
     const sub = subscribers[key];
     const email = sub.email;
@@ -103,32 +101,28 @@ async function checkBalances() {
       emailAddressMap[email] = { addresses: new Set(), lastBalances: {} };
     }
 
-    // 合并地址
     addresses.forEach(addr => emailAddressMap[email].addresses.add(addr));
-
-    // 合并最后余额记录
     Object.entries(lastBalances).forEach(([addr, bal]) => {
       emailAddressMap[email].lastBalances[addr] = bal;
     });
   }
 
-  // 遍历每个邮箱检查余额
+  // 遍历每个邮箱检查地址余额变化
   for (const [email, { addresses, lastBalances }] of Object.entries(emailAddressMap)) {
     const changedBalances = {};
     const newBalances = { ...lastBalances };
 
     for (const addr of addresses) {
       const balance = await fetchBalance(addr);
-      addressSnapshots[addr] = balance; // ✅ 记录每个地址当前余额
+      addressSnapshots[addr] = balance; // ✅ 存储每个地址的当前余额
       newBalances[addr] = balance;
-    
+
       if (balance !== lastBalances[addr]) {
         changedBalances[addr] = { old: lastBalances[addr] || 0, new: balance };
       }
     }
 
-
-    // 更新数据库中所有该邮箱的记录
+    // 更新所有该邮箱订阅记录的 lastBalances
     for (const key of Object.keys(subscribers)) {
       if (subscribers[key].email === email) {
         await db.ref(`subscribers/${key}/lastBalances`).set(newBalances);
@@ -140,32 +134,31 @@ async function checkBalances() {
     }
   }
 
-  // 发送邮件通知
+  // 发送邮件提醒
   await sendNotifications(notifications);
-
   console.log(`余额检查完成，共发送 ${notifications.length} 封通知`);
 
-  // 6️⃣ 写入历史记录
+  // 🧠 写入历史记录
   const totalBTC = Object.values(emailAddressMap).reduce((sum, { addresses }) => {
     return sum + [...addresses].reduce((s, addr) => s + (addressSnapshots[addr] || 0), 0);
   }, 0);
-  
-  const timestamp = new Date().toISOString().replace(/[.#$\[\]]/g, "_").replace(/:/g, "-");
-  const historyRef = db.ref(`history/${timestamp}`);
 
-  
+  const timestamp = Date.now(); // 用作 Firebase key，避免非法字符
+  const isoTime = new Date(timestamp).toISOString(); // 用于前端显示
+
+  const historyRef = db.ref(`history/${timestamp}`);
   const historyEntry = {
+    time: isoTime, // ✅ ISO 格式字符串
     totalBTC,
     totalUSD: +(totalBTC * btcPrice).toFixed(2),
-    addresses: addressSnapshots, // { addr1: bal1, addr2: bal2, ... }
+    addresses: addressSnapshots,
   };
-  
-  await historyRef.set(historyEntry);
-  console.log(`📈 历史记录写入成功 @ ${timestamp}`);
 
+  await historyRef.set(historyEntry);
+  console.log(`📈 历史记录写入成功 @ ${isoTime}`);
 }
 
-// 默认导出函数，兼容 GET & POST
+// 默认导出
 export default async function handler(req, res) {
   if (req.method !== "GET" && req.method !== "POST") {
     return res.status(405).json({ message: "Method Not Allowed" });
