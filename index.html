@@ -280,17 +280,18 @@
     }
 
     async function drawHistoryChart() {
-      const urlSecret = new URLSearchParams(location.search).get("secret");
-      if (!urlSecret) return;
-    
       try {
-        const res = await fetch(`/api/get-history?secret=${urlSecret}`);
+        const res = await fetch("/api/get-history?secret=你的secret");
         const { history } = await res.json();
+    
+        console.log("📊 获取到历史数据：", history);
     
         const labels = history.map(i => {
           const date = new Date(i.time);
-          return isNaN(date) ? "无效时间" : date.toLocaleString();
+          console.log("转换时间：", i.time, " → ", date.toString());
+          return date.toLocaleString();
         });
+    
         const data = history.map(i => i.totalBTC);
     
         new Chart(document.getElementById("chart"), {
@@ -301,30 +302,15 @@
               label: "总BTC数量变化",
               data,
               borderColor: "#4a90e2",
-              backgroundColor: "rgba(74, 144, 226, 0.1)",
-              fill: true,
-              tension: 0.2,
-              pointRadius: 2,
+              fill: false,
+              tension: 0.2
             }]
           },
           options: {
             responsive: true,
-            plugins: {
-              legend: { display: true },
-              tooltip: { mode: 'index', intersect: false }
-            },
             scales: {
-              x: {
-                ticks: {
-                  maxRotation: 60,
-                  minRotation: 30,
-                  autoSkip: true,
-                }
-              },
-              y: {
-                beginAtZero: true,
-                title: { display: true, text: 'BTC 总余额' }
-              }
+              x: { display: true },
+              y: { beginAtZero: true }
             }
           }
         });
@@ -332,6 +318,7 @@
         console.error("历史图表加载失败", err);
       }
     }
+
 
 
 
