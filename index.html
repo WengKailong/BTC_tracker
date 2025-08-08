@@ -279,47 +279,83 @@
       document.getElementById("totalUSD").innerText = (totalBTC * btcPrice).toLocaleString();
     }
 
-    async function drawHistoryChart() {
-      const urlSecret = new URLSearchParams(location.search).get("secret");
-      if (!urlSecret) return;
-      try {
-        const res = await fetch(`/api/get-history?secret=${urlSecret}`);
-        const { history } = await res.json();
+    function parseTimeToDate(t) {
+      if (t == null) return null;
     
-        console.log("📊 获取到历史数据：", history);
-    
-        const labels = history.map(i => {
-          const date = new Date(i.time);
-          console.log("转换时间：", i.time, " → ", date.toString());
-          return date.toLocaleString();
-        });
-    
-        const data = history.map(i => i.totalBTC);
-    
-        new Chart(document.getElementById("chart"), {
-          type: "line",
-          data: {
-            labels,
-            datasets: [{
-              label: "总BTC数量变化",
-              data,
-              borderColor: "#4a90e2",
-              fill: false,
-              tension: 0.2
-            }]
-          },
-          options: {
-            responsive: true,
-            scales: {
-              x: { display: true },
-              y: { beginAtZero: true }
-            }
-          }
-        });
-      } catch (err) {
-        console.error("历史图表加载失败", err);
+      // 数字或数字字符串
+      if (typeof t === "number" || (/^\d+$/.test(String(t)))) {
+        const d = new Date(Number(t));
+        return isNaN(d) ? null : d;
       }
+    
+      // 修复 2025-08-07T14-06-46_248Z
+      if (typeof t === "string" && /T\d{2}-\d{2}-\d{2}_\d{3}Z$/.test(t)) {
+        const fixed = t.replace(/T(\d{2})-(\d{2})-(\d{2})_(\d{3})Z$/, "T$1:$2:$3.$4Z");
+        const d = new Date(fixed);
+        return isNaN(d) ? null : d;
+      }
+    
+      // 常规字符串解析
+      if (typeof t === "string") {
+        const d = new Date(t);
+        return isNaN(d) ? null : d;
+      }
+    
+      return null;
     }
+
+  async function drawHistoryChart() {
+    const urlSecret = new URLSearchParams(location.search).get("secret");
+    if (!urlSecret) return;
+  
+    try {
+      const res = await fetch(`/api/get-history?secret=${urlSecret}`);
+      const result = await res.json();
+  
+      if (!Array.isArray(result.history)) {
+        console.warn("历史数据格式不正确", result);
+        return;
+      }
+  
+      // 解析并过滤掉仍然无效的时间
+      const parsed = result.history
+        .map(i => ({ date: parseTimeToDate(i.time), totalBTC: i.totalBTC }))
+        .filter(i => i.date instanceof Date && !isNaN(i.date));
+  
+      const labels = parsed.map(i => i.date.toLocaleString());
+      const data = parsed.map(i => i.totalBTC);
+  
+      new Chart(document.getElementById("chart"), {
+        type: "line",
+        data: {
+          labels,
+          datasets: [{
+            label: "总BTC数量变化",
+            data,
+            borderColor: "#4a90e2",
+            backgroundColor: "rgba(74,144,226,0.1)",
+            fill: true,
+            tension: 0.2,
+            pointRadius: 2,
+          }]
+        },
+        options: {
+          responsive: true,
+          plugins: {
+            legend: { display: true },
+            tooltip: { mode: 'index', intersect: false }
+          },
+          scales: {
+            x: { ticks: { autoSkip: true, maxRotation: 60, minRotation: 30 }},
+            y: { beginAtZero: true, title: { display: true, text: 'BTC 总余额' } }
+          }
+        }
+      });
+    } catch (err) {
+      console.error("历史图表加载失败", err);
+    }
+  }
+
 
 
 
