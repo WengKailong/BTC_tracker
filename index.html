@@ -154,6 +154,24 @@
       padding: 16px;
     }
   }
+
+    .chart-wrap{
+    width: 100%;
+    max-width: 1200px;   /* 桌面端更宽 */
+    margin: 10px auto 24px;
+    padding: 0 12px;
+  }
+  canvas{
+    display: block;
+    width: 100% !important;
+    height: 280px !important;   /* 移动端默认高度 */
+  }
+  @media (min-width: 900px){
+    canvas{
+      height: 420px !important; /* 桌面端更高 */
+    }
+  }
+    
 </style>
 
 </head>
@@ -173,7 +191,21 @@
     总BTC数量: <span id="totalBTC">0</span> BTC &nbsp;|&nbsp; 总价值: $<span id="totalUSD">0</span>
   </div>
 
+  <div class="chart-wrap">
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
+    <strong>总余额趋势</strong>
+    <label style="font-size:14px;color:#666;">
+      粒度：
+      <select id="aggSelect">
+        <option value="day" selected>按天</option>
+        <option value="month">按月</option>
+        <option value="year">按年</option>
+      </select>
+    </label>
+  </div>
   <canvas id="chart"></canvas>
+</div>
+
 
   <div id="wallets"></div>
 
@@ -279,78 +311,134 @@
       document.getElementById("totalUSD").innerText = (totalBTC * btcPrice).toLocaleString();
     }
 
-    function parseTimeToDate(t) {
-      if (t == null) return null;
-    
-      // 数字或数字字符串
-      if (typeof t === "number" || (/^\d+$/.test(String(t)))) {
-        const d = new Date(Number(t));
-        return isNaN(d) ? null : d;
-      }
-    
-      // 修复 2025-08-07T14-06-46_248Z
-      if (typeof t === "string" && /T\d{2}-\d{2}-\d{2}_\d{3}Z$/.test(t)) {
-        const fixed = t.replace(/T(\d{2})-(\d{2})-(\d{2})_(\d{3})Z$/, "T$1:$2:$3.$4Z");
-        const d = new Date(fixed);
-        return isNaN(d) ? null : d;
-      }
-    
-      // 常规字符串解析
-      if (typeof t === "string") {
-        const d = new Date(t);
-        return isNaN(d) ? null : d;
-      }
-    
-      return null;
+    // 解析各种 time（ISO / 毫秒数 / 旧格式）为 Date
+  function parseTimeToDate(t) {
+    if (t == null) return null;
+    if (typeof t === "number" || (/^\d+$/.test(String(t)))) {
+      const d = new Date(Number(t));
+      return isNaN(d) ? null : d;
     }
+    if (typeof t === "string" && /T\d{2}-\d{2}-\d{2}_\d{3}Z$/.test(t)) {
+      const fixed = t.replace(/T(\d{2})-(\d{2})-(\d{2})_(\d{3})Z$/, "T$1:$2:$3.$4Z");
+      const d = new Date(fixed);
+      return isNaN(d) ? null : d;
+    }
+    if (typeof t === "string") {
+      const d = new Date(t);
+      return isNaN(d) ? null : d;
+    }
+    return null;
+  }
+
+  // 把历史数组按 period = 'day' | 'month' | 'year' 聚合
+  // 规则：同一周期取“该周期最后一条记录”的 totalBTC（更符合余额“快照”的直觉）
+  function aggregateHistory(history, period) {
+    const bucketKey = (d) => {
+      const y = d.getUTCFullYear();
+      const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+      const day = String(d.getUTCDate()).padStart(2, '0');
+      if (period === 'year') return `${y}`;
+      if (period === 'month') return `${y}-${m}`;
+      return `${y}-${m}-${day}`;
+    };
+
+    // 先按桶分组，并记录每桶“时间最大的那条”
+    const buckets = new Map(); // key -> {date, totalBTC}
+    for (const item of history) {
+      const d = parseTimeToDate(item.time);
+      if (!(d instanceof Date) || isNaN(d)) continue;
+      const key = bucketKey(d);
+      const prev = buckets.get(key);
+      if (!prev || d > prev.date) {
+        buckets.set(key, { date: d, totalBTC: item.totalBTC ?? 0 });
+      }
+    }
+
+    // 产出有序数组（按时间升序）
+    const out = Array.from(buckets.values())
+      .sort((a, b) => a.date - b.date)
+      .map(({ date, totalBTC }) => ({ date, totalBTC }));
+
+    return out;
+  }
+
+  // 用聚合后的数据渲染/刷新图表
+  let chartInstance = null;
+  function renderHistoryChart(aggData) {
+    const labels = aggData.map(i => i.date.toLocaleDateString()); // 粒度已合并，日/月/年
+    const data = aggData.map(i => i.totalBTC);
+
+    const ctx = document.getElementById("chart").getContext("2d");
+    if (chartInstance) {
+      chartInstance.data.labels = labels;
+      chartInstance.data.datasets[0].data = data;
+      chartInstance.update();
+      return;
+    }
+
+    chartInstance = new Chart(ctx, {
+      type: "line",
+      data: {
+        labels,
+        datasets: [{
+          label: "总BTC数量变化",
+          data,
+          borderColor: "#4a90e2",
+          backgroundColor: "rgba(74,144,226,0.1)",
+          fill: true,
+          tension: 0.2,
+          pointRadius: 2,
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,  // 允许用 CSS 控制高度
+        plugins: {
+          legend: { display: true },
+          tooltip: { mode: 'index', intersect: false }
+        },
+        scales: {
+          x: {
+            ticks: { autoSkip: true, maxRotation: 0, minRotation: 0 }
+          },
+          y: {
+            beginAtZero: true,
+            title: { display: true, text: 'BTC 总余额' }
+          }
+        }
+      }
+    });
+  }
 
   async function drawHistoryChart() {
     const urlSecret = new URLSearchParams(location.search).get("secret");
     if (!urlSecret) return;
-  
+
     try {
       const res = await fetch(`/api/get-history?secret=${urlSecret}`);
       const result = await res.json();
-  
       if (!Array.isArray(result.history)) {
         console.warn("历史数据格式不正确", result);
         return;
       }
-  
-      // 解析并过滤掉仍然无效的时间
-      const parsed = result.history
-        .map(i => ({ date: parseTimeToDate(i.time), totalBTC: i.totalBTC }))
-        .filter(i => i.date instanceof Date && !isNaN(i.date));
-  
-      const labels = parsed.map(i => i.date.toLocaleString());
-      const data = parsed.map(i => i.totalBTC);
-  
-      new Chart(document.getElementById("chart"), {
-        type: "line",
-        data: {
-          labels,
-          datasets: [{
-            label: "总BTC数量变化",
-            data,
-            borderColor: "#4a90e2",
-            backgroundColor: "rgba(74,144,226,0.1)",
-            fill: true,
-            tension: 0.2,
-            pointRadius: 2,
-          }]
-        },
-        options: {
-          responsive: true,
-          plugins: {
-            legend: { display: true },
-            tooltip: { mode: 'index', intersect: false }
-          },
-          scales: {
-            x: { ticks: { autoSkip: true, maxRotation: 60, minRotation: 30 }},
-            y: { beginAtZero: true, title: { display: true, text: 'BTC 总余额' } }
-          }
-        }
-      });
+
+      // 先保存原始历史（供切换粒度时复用）
+      window.__rawHistory = result.history;
+
+      // 默认显示“按天”聚合
+      const initial = aggregateHistory(window.__rawHistory, 'day');
+      renderHistoryChart(initial);
+
+      // 绑定粒度选择器
+      const sel = document.getElementById('aggSelect');
+      if (sel && !sel.__bound) {
+        sel.addEventListener('change', () => {
+          const period = sel.value; // 'day' | 'month' | 'year'
+          const agg = aggregateHistory(window.__rawHistory, period);
+          renderHistoryChart(agg);
+        });
+        sel.__bound = true;
+      }
     } catch (err) {
       console.error("历史图表加载失败", err);
     }
